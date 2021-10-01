@@ -68,7 +68,8 @@ namespace Windows.UI.Xaml.Controls
 			if (InternalItemsPanelRoot == null)
 			{
 				//We probably haven't called OnApplyTemplate() yet
-				return base.UpdateItems(args);
+				base.UpdateItems(args);
+				return;
 			}
 
 			if (CollectionView == null)
