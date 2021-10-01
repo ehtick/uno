@@ -29,7 +29,7 @@ namespace Windows.UI.Xaml.Controls
 
 		protected override void OnMeasure(int widthMeasureSpec, int heightMeasureSpec)
 		{
-			UpdateItemsIfNeeded();
+			// UpdateItemsIfNeeded();
 			base.OnMeasure(widthMeasureSpec, heightMeasureSpec);
 		}
 

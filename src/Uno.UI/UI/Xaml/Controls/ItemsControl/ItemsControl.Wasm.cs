@@ -19,7 +19,7 @@ namespace Windows.UI.Xaml.Controls
 
 		protected override Size MeasureOverride(Size availableSize)
 		{
-			UpdateItemsIfNeeded();
+			// UpdateItems(null);
 			return base.MeasureOverride(availableSize);
 		}
 	}
