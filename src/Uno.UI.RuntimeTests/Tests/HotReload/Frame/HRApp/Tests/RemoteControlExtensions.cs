@@ -30,7 +30,7 @@ internal static class HotReloadHelper
 		await RemoteControlClient.Instance.SendMessage(message);
 
 
-		var reloadWaiter = TypeMappings.WaitForMappingsToResume();
+		var reloadWaiter = TypeMappings.WaitForResume();
 		if (!reloadWaiter.IsCompleted)
 		{
 			// Reloads are paused (ie task hasn't completed), so don't wait for any update
@@ -67,7 +67,7 @@ internal static class HotReloadHelper
 
 		await RemoteControlClient.Instance.SendMessage(message);
 
-		var reloadWaiter = TypeMappings.WaitForMappingsToResume();
+		var reloadWaiter = TypeMappings.WaitForResume();
 		if (!reloadWaiter.IsCompleted)
 		{
 			// Reloads are paused (ie task hasn't completed), so don't wait for any update
@@ -95,11 +95,16 @@ internal static class HotReloadHelper
 
 		await RemoteControlClient.Instance.WaitForConnection();
 
-		await UpdateServerFile(filePathInProject, originalText, replacementText, ct);
+		try
+		{
+			await UpdateServerFile(filePathInProject, originalText, replacementText, ct);
 
-		await callback();
-
-		await UpdateServerFile(filePathInProject, replacementText, originalText, ct);
+			await callback();
+		}
+		finally
+		{
+			await UpdateServerFile(filePathInProject, replacementText, originalText, CancellationToken.None);
+		}
 	}
 
 	public static async Task UpdateServerFileAndRevert<T>(
@@ -116,11 +121,16 @@ internal static class HotReloadHelper
 
 		await RemoteControlClient.Instance.WaitForConnection();
 
-		await UpdateServerFile<T>(originalText, replacementText, ct);
+		try
+		{
+			await UpdateServerFile<T>(originalText, replacementText, ct);
 
-		await callback();
-
-		await UpdateServerFile<T>(replacementText, originalText, ct);
+			await callback();
+		}
+		finally
+		{
+			await UpdateServerFile<T>(replacementText, originalText, CancellationToken.None);
+		}
 	}
 
 	/// <summary>

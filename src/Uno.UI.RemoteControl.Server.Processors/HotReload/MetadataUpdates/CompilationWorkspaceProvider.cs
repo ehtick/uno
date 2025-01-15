@@ -7,7 +7,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using Uno.Extensions;
-using Uno.UI.RemoteControl.Server.Processors.Helpers;
+using Uno.UI.RemoteControl.Helpers;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 
@@ -17,26 +17,12 @@ namespace Uno.UI.RemoteControl.Host.HotReload.MetadataUpdates
 	{
 		private static string MSBuildBasePath = "";
 
-		public static Task<(Solution, WatchHotReloadService)> CreateWorkspaceAsync(
+		public static async Task<(Solution, WatchHotReloadService)> CreateWorkspaceAsync(
 			string projectPath,
 			IReporter reporter,
 			string[] metadataUpdateCapabilities,
 			Dictionary<string, string> properties,
-			CancellationToken cancellationToken)
-		{
-			var taskCompletionSource = new TaskCompletionSource<(Solution, WatchHotReloadService)>(TaskCreationOptions.RunContinuationsAsynchronously);
-			CreateProject(taskCompletionSource, projectPath, reporter, metadataUpdateCapabilities, properties, cancellationToken);
-
-			return taskCompletionSource.Task;
-		}
-
-		static async void CreateProject(
-			TaskCompletionSource<(Solution, WatchHotReloadService)> taskCompletionSource,
-			string projectPath,
-			IReporter reporter,
-			string[] metadataUpdateCapabilities,
-			Dictionary<string, string> properties,
-			CancellationToken cancellationToken)
+			CancellationToken ct)
 		{
 			if (properties.TryGetValue("UnoEnCLogPath", out var EnCLogPath))
 			{
@@ -63,39 +49,52 @@ namespace Uno.UI.RemoteControl.Host.HotReload.MetadataUpdates
 				}
 			}
 
-			var workspace = MSBuildWorkspace.Create(globalProperties);
-
-			workspace.WorkspaceFailed += (_sender, diag) =>
+			MSBuildWorkspace workspace = null!;
+			for (var i = 3; i > 0; i--)
 			{
-				// In some cases, load failures may be incorrectly reported such as this one:
-				// https://github.com/dotnet/roslyn/blob/fd45aeb5fbc97d09d4043cef9c9c5142f7638e5c/src/Workspaces/Core/MSBuild/MSBuild/MSBuildProjectLoader.Worker.cs#L245-L259
-				// Since the text may be localized we cannot rely on it, so we never fail the project loading for now.
-				reporter.Verbose($"MSBuildWorkspace {diag.Diagnostic}");
-			};
+				try
+				{
+					workspace = MSBuildWorkspace.Create(globalProperties);
 
-			await workspace.OpenProjectAsync(projectPath, cancellationToken: cancellationToken);
+					workspace.WorkspaceFailed += (_sender, diag) =>
+					{
+						// In some cases, load failures may be incorrectly reported such as this one:
+						// https://github.com/dotnet/roslyn/blob/fd45aeb5fbc97d09d4043cef9c9c5142f7638e5c/src/Workspaces/Core/MSBuild/MSBuild/MSBuildProjectLoader.Worker.cs#L245-L259
+						// Since the text may be localized we cannot rely on it, so we never fail the project loading for now.
+						reporter.Verbose($"MSBuildWorkspace {diag.Diagnostic}");
+					};
+
+					await workspace.OpenProjectAsync(projectPath, cancellationToken: ct);
+					break;
+				}
+				catch (InvalidOperationException) when (i > 1)
+				{
+					// When we load the work space right after the app was started, it happens that it "app build" is not yet completed, preventing us to open the project.
+					// We retry a few times to let the build complete.
+					await Task.Delay(5_000, ct);
+				}
+			}
 			var currentSolution = workspace.CurrentSolution;
 			var hotReloadService = new WatchHotReloadService(workspace.Services, metadataUpdateCapabilities);
-			await hotReloadService.StartSessionAsync(currentSolution, cancellationToken);
+			await hotReloadService.StartSessionAsync(currentSolution, ct);
 
 			// Read the documents to memory
-			await Task.WhenAll(
-				currentSolution.Projects.SelectMany(p => p.Documents.Concat(p.AdditionalDocuments)).Select(d => d.GetTextAsync(cancellationToken)));
+			await Task.WhenAll(currentSolution.Projects.SelectMany(p => p.Documents.Concat(p.AdditionalDocuments)).Select(d => d.GetTextAsync(ct)));
 
 			// Warm up the compilation. This would help make the deltas for first edit appear much more quickly
 			foreach (var project in currentSolution.Projects)
 			{
-				await project.GetCompilationAsync(cancellationToken);
+				await project.GetCompilationAsync(ct);
 			}
 
-			taskCompletionSource.TrySetResult((currentSolution, hotReloadService));
+			return (currentSolution, hotReloadService);
 		}
 
 		public static void InitializeRoslyn(string? workDir)
 		{
 			RegisterAssemblyLoader();
 
-			MSBuildBasePath = BuildMSBuildPath();
+			MSBuildBasePath = BuildMSBuildPath(workDir);
 
 			var version = GetDotnetVersion(workDir);
 			if (version.Major != typeof(object).Assembly.GetName().Version?.Major)
@@ -135,9 +134,9 @@ namespace Uno.UI.RemoteControl.Host.HotReload.MetadataUpdates
 			throw new InvalidOperationException("Failed to read dotnet version");
 		}
 
-		private static string BuildMSBuildPath()
+		private static string BuildMSBuildPath(string? workDir)
 		{
-			var result = ProcessHelper.RunProcess("dotnet.exe", "--info");
+			var result = ProcessHelper.RunProcess("dotnet.exe", "--info", workDir);
 
 			if (result.exitCode == 0)
 			{

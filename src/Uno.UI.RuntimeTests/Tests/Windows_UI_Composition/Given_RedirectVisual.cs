@@ -6,20 +6,21 @@ using System.Threading.Tasks;
 using Private.Infrastructure;
 using Uno.Extensions;
 using Uno.UI.RuntimeTests.Helpers;
-using Windows.UI.Composition;
-using Windows.UI.Xaml;
-using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Hosting;
-using Windows.UI.Xaml.Media;
+using Microsoft.UI.Composition;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Composition;
 
 [TestClass]
 public class Given_RedirectVisual
 {
-#if __SKIA__
 	[TestMethod]
 	[RunsOnUIThread]
+	[Ignore("Disabled because of https://github.com/unoplatform/uno-private/issues/307")]
 	public async Task When_Source_Changes()
 	{
 		var compositor = Window.Current.Compositor;
@@ -28,7 +29,7 @@ public class Given_RedirectVisual
 			Width = 200,
 			Height = 200,
 			Stretch = Stretch.UniformToFill,
-			Source = ImageSource.TryCreateUriFromString("https://uno-assets.platform.uno/logos/uno.png")
+			Source = new BitmapImage(new Uri("https://uno-assets.platform.uno/logos/uno.png")),
 		};
 		var sut = new ContentControl
 		{
@@ -63,5 +64,4 @@ public class Given_RedirectVisual
 
 		return (await UITestHelper.ScreenShot(expected), await UITestHelper.ScreenShot(sut));
 	}
-#endif
 }

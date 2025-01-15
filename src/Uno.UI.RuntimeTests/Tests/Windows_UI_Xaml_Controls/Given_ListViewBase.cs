@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -10,39 +10,43 @@ using Windows.Foundation;
 using Windows.System;
 using Windows.UI;
 using Windows.UI.Input.Preview.Injection;
-using Windows.UI.Xaml;
-using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Controls.Primitives;
-using Windows.UI.Xaml.Data;
-using Windows.UI.Xaml.Input;
-using Windows.UI.Xaml.Markup;
-using Windows.UI.Xaml.Media;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Media;
 using FluentAssertions;
 using FluentAssertions.Execution;
-using MUXControlsTestApp.Utilities;
 using Private.Infrastructure;
 using Uno.Extensions;
+using Uno.UI.Helpers;
 using Uno.UI.RuntimeTests.Extensions;
 using Uno.UI.RuntimeTests.Helpers;
 using Uno.UI.RuntimeTests.ListViewPages;
-using Uno.UI.RuntimeTests.Tests.Uno_UI_Xaml_Core;
 
-#if NETFX_CORE
-using Uno.UI.Extensions;
-#elif __IOS__
-using Foundation;
-using UIKit;
-#elif __MACOS__
-using AppKit;
-#else
+#if !WINAPPSDK
 using Uno.UI;
 #endif
 
-using static Private.Infrastructure.TestServices;
+#if __IOS__
+using Foundation;
+#endif
+
 using Point = Windows.Foundation.Point;
+using TabView = Microsoft/* UWP don't rename */.UI.Xaml.Controls.TabView;
+using TabViewItem = Microsoft/* UWP don't rename */.UI.Xaml.Controls.TabViewItem;
+
+using static Private.Infrastructure.TestServices;
+using static Uno.UI.Extensions.ViewExtensions;
+using MUXControlsTestApp.Utilities;
 
 namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 {
+#if __IOS__
+	[Ignore("Disable all listview tests until crash is resolved https://github.com/unoplatform/uno/issues/17101")]
+#endif
 	public partial class Given_ListViewBase // resources
 	{
 		private ResourceDictionary _testsResources;
@@ -314,7 +318,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			SelectorItem si = null;
 			await WindowHelper.WaitFor(() => (si = SUT.ContainerFromItem(source[0]) as SelectorItem) != null);
 
-			var tb = si.FindFirstChild<TextBlock>();
+			var tb = si.FindFirstDescendant<TextBlock>();
 			Assert.AreEqual("item 0", tb?.Text);
 		}
 
@@ -442,7 +446,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			await WindowHelper.WaitFor(() => (si = SUT.ContainerFromItem(source[0]) as SelectorItem) != null);
 
 			Assert.AreEqual("Item 1", si.Content);
-#if NETFX_CORE // On iOS and Android (others not tested), ContentTemplateRoot is null, and TemplatedRoot is a ContentPresenter containing an ImplicitTextBlock
+#if WINAPPSDK // On iOS and Android (others not tested), ContentTemplateRoot is null, and TemplatedRoot is a ContentPresenter containing an ImplicitTextBlock
 			Assert.IsInstanceOfType(si.ContentTemplateRoot, typeof(TextBlock));
 			Assert.AreEqual("Item 1", (si.ContentTemplateRoot as TextBlock).Text);
 #endif
@@ -473,7 +477,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			var si = SUT.ContainerFromItem(source[0]) as SelectorItem;
 			Assert.AreEqual("item 1", si.Content);
 			Assert.AreSame(si, source[0]);
-#if !NETFX_CORE
+#if !WINAPPSDK
 			Assert.IsFalse(si.IsGeneratedContainer);
 #endif
 
@@ -482,7 +486,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			Assert.IsNotNull(si2);
 			Assert.AreNotSame(si2, source[1]);
 			Assert.AreEqual("item 2", si2.Content);
-#if !NETFX_CORE
+#if !WINAPPSDK
 			Assert.AreEqual("item 2", si2.DataContext);
 			Assert.IsTrue(si2.IsGeneratedContainer);
 #endif
@@ -513,8 +517,8 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			ListViewItem lvi = null;
 			await WindowHelper.WaitFor(() => (lvi = SUT.ContainerFromItem(source[0]) as ListViewItem) != null);
 
-			Assert.IsNull(lvi.FindFirstChild<ListViewItem>(includeCurrent: false));
-			Assert.IsNull(lvi.FindFirstParent<ListViewItem>(includeCurrent: false));
+			Assert.IsNull(lvi.FindFirstDescendant<ListViewItem>());
+			Assert.IsNull(lvi.FindFirstAncestor<ListViewItem>());
 			Assert.AreEqual("SelfHostingListViewItem", lvi.Name);
 
 			var content = lvi.Content as Border;
@@ -836,8 +840,8 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 #if HAS_UNO
 		[TestMethod]
 		[RunsOnUIThread]
-#if !__SKIA__
-		[Ignore("InputInjector is only supported on skia")]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
 #endif
 		public async Task When_Multiple_Selection_Pointer()
 		{
@@ -937,12 +941,12 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			selected.AddRange(items.Where((_, i) => i is > 1 and <= 3).ToList());
 			await AssertSelected();
 
-			KeyboardHelper.Down(list);
-			KeyboardHelper.Down(list);
+			await KeyboardHelper.Down(list);
+			await KeyboardHelper.Down(list);
 
 			await AssertSelected();
 
-			KeyboardHelper.Space(list);
+			await KeyboardHelper.Space(list);
 			list.SafeRaiseEvent(UIElement.KeyDownEvent, new KeyRoutedEventArgs(list, VirtualKey.Down, VirtualKeyModifiers.Shift));
 			list.SafeRaiseEvent(UIElement.KeyDownEvent, new KeyRoutedEventArgs(list, VirtualKey.Down, VirtualKeyModifiers.Shift));
 			list.SafeRaiseEvent(UIElement.KeyDownEvent, new KeyRoutedEventArgs(list, VirtualKey.Down, VirtualKeyModifiers.Shift));
@@ -950,7 +954,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			selected.AddRange(items.Where((_, i) => i is >= 5 and <= 8).ToList());
 			await AssertSelected();
 
-			KeyboardHelper.Down(list);
+			await KeyboardHelper.Down(list);
 			list.SafeRaiseEvent(UIElement.KeyDownEvent, new KeyRoutedEventArgs(list, VirtualKey.Up, VirtualKeyModifiers.Shift));
 			list.SafeRaiseEvent(UIElement.KeyDownEvent, new KeyRoutedEventArgs(list, VirtualKey.Up, VirtualKeyModifiers.Shift));
 
@@ -969,8 +973,8 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 #if HAS_UNO
 		[TestMethod]
 		[RunsOnUIThread]
-#if !__SKIA__
-		[Ignore("InputInjector is only supported on skia")]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
 #endif
 		public async Task When_Extended_Selection_Pointer()
 		{
@@ -1079,13 +1083,13 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			selected.AddRange(items.Where((_, i) => i is > 1 and <= 3).ToList());
 			await AssertSelected();
 
-			KeyboardHelper.Down(list);
+			await KeyboardHelper.Down(list);
 
 			items.Where((_, i) => i is >= 1 and <= 3).ForEach(item => selected.Remove(item));
 			selected.Add(items[4]);
 			await AssertSelected();
 
-			KeyboardHelper.Down(list);
+			await KeyboardHelper.Down(list);
 
 			selected.Remove(items[4]);
 			selected.Add(items[5]);
@@ -1180,8 +1184,8 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 #if HAS_UNO
 		[TestMethod]
 		[RunsOnUIThread]
-#if !__SKIA__
-		[Ignore("InputInjector is only supported on skia")]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
 #endif
 		public async Task When_Extended_Selection_SelectedIndex_Changed_Mixed()
 		{
@@ -1237,7 +1241,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 		[TestMethod]
 		[RunsOnUIThread]
-#if NETFX_CORE
+#if WINAPPSDK
 		[Ignore("KeyboardHelper doesn't work on Windows")]
 #endif
 		public async Task When_Horizontal_Keyboard_Navigation()
@@ -1269,16 +1273,62 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			Assert.AreEqual(1, SUT.SelectedIndex);
 
-			KeyboardHelper.Right();
-			KeyboardHelper.Right();
+			await KeyboardHelper.Right();
+			await KeyboardHelper.Right();
 			await WindowHelper.WaitForIdle();
 
 			Assert.AreEqual(3, SUT.SelectedIndex);
 
-			KeyboardHelper.Left();
+			await KeyboardHelper.Left();
 			await WindowHelper.WaitForIdle();
 
 			Assert.AreEqual(2, SUT.SelectedIndex);
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
+#if NETFX_CORE
+		[Ignore("KeyboardHelper doesn't work on Windows")]
+#endif
+		public async Task When_Space_Or_Enter()
+		{
+			var SUT = new ListView
+			{
+				ItemsSource = "012345"
+			};
+
+			var grid = new Grid
+			{
+				Children =
+				{
+					SUT
+				}
+			};
+
+			var handled = false;
+			grid.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) => handled = args.Handled), true);
+
+			WindowHelper.WindowContent = grid;
+			await WindowHelper.WaitForIdle();
+
+			var lvi1 = (ListViewItem)SUT.ContainerFromIndex(0);
+			lvi1.Focus(FocusState.Programmatic);
+			await WindowHelper.WaitForIdle();
+
+			await KeyboardHelper.Space();
+			await WindowHelper.WaitForIdle();
+
+			Assert.IsTrue(lvi1.IsSelected);
+			Assert.IsTrue(handled);
+
+			handled = false;
+
+			SUT.SelectedIndex = -1;
+
+			await KeyboardHelper.Enter();
+			await WindowHelper.WaitForIdle();
+
+			Assert.IsTrue(handled);
 		}
 
 		[TestMethod]
@@ -1330,15 +1380,15 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 				WindowHelper.WindowContent = page;
 				await WindowHelper.WaitForIdle();
 
-				var list = page.FindFirstChild<ListView>();
+				var list = page.FindFirstDescendant<ListView>();
 				Assert.IsNotNull(list);
 
 				for (int i = 0; i < 3; i++)
 				{
 					ListViewItem lvi = null;
 					await WindowHelper.WaitFor(() => (lvi = list.ContainerFromItem(i) as ListViewItem) != null);
-					var sp = lvi.FindFirstChild<StackPanel>();
-					var tb = sp?.FindFirstChild<TextBlock>();
+					var sp = lvi.FindFirstDescendant<StackPanel>();
+					var tb = sp?.FindFirstDescendant<TextBlock>();
 					Assert.IsNotNull(tb);
 					Assert.AreEqual("OuterContextText", tb.Text);
 				}
@@ -1366,7 +1416,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			await WindowHelper.WaitForIdle();
 
-#if NETFX_CORE // TODO: subscribe to changes to Source property
+#if WINAPPSDK // TODO: subscribe to changes to Source property
 			Assert.AreEqual(3, page.SubjectListView.Items.Count);
 #endif
 			ListViewItem lvi = null;
@@ -1699,8 +1749,10 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 		[TestMethod]
 		[RunsOnUIThread]
-#if !__SKIA__
-		[Ignore("InputInjector is only supported on skia")]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
+#elif !HAS_RENDER_TARGET_BITMAP
+		[Ignore("Cannot take screenshot on this platform.")]
 #endif
 		public async Task When_Large_List_Scroll_To_End_Then_Back_Up_TryClick()
 		{
@@ -1936,11 +1988,13 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			// since this is originally a virtualization issue and references
 			// could be to different things than those shown on the screen.
 			var si = await UITestHelper.ScreenShot(list, true);
-			ImageAssert.HasColorAt(si, 70, 65, Colors.FromARGB("#66AEE7")); // selected
+			// on macOS/metal we get the color #1A6AA7 which is quite close but not identical
+			var tolerance = (byte)(OperatingSystem.IsMacOS() ? 1 : 0);
+			ImageAssert.HasColorAt(si, 70, 65, Colors.FromARGB("#1A69A6"), tolerance); // selected
 
 			// check starting from below the second item that nothing looks selected or hovered
-			ImageAssert.DoesNotHaveColorInRectangle(si, new Rectangle(100, 110, si.Width - 100, si.Height - 110), Colors.FromARGB("#66AEE7")); // selected
-			ImageAssert.DoesNotHaveColorInRectangle(si, new Rectangle(100, 110, si.Width - 100, si.Height - 110), Colors.FromARGB("#FFE6E6E6")); // hovered
+			ImageAssert.DoesNotHaveColorInRectangle(si, new Rectangle(100, 110, si.Width - 100, si.Height - 110), Colors.FromARGB("#1A69A6"), tolerance); // selected
+			ImageAssert.DoesNotHaveColorInRectangle(si, new Rectangle(100, 110, si.Width - 100, si.Height - 110), Colors.FromARGB("#FFE6E6E6"), tolerance); // hovered
 		}
 
 		[TestMethod]
@@ -1996,6 +2050,37 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 		[TestMethod]
 		[RunsOnUIThread]
+		public async Task When_Arrow_keys_ListView_Only_Scrolled_As_Needed()
+		{
+			var SUT = new ListView
+			{
+				Height = 120, // fits 2 items and a bit
+				ItemsSource = "12345"
+			};
+
+			await UITestHelper.Load(SUT);
+
+			var sv = (ScrollViewer)SUT.GetTemplateChild("ScrollViewer");
+			var lvi = (ListViewItem)SUT.ContainerFromIndex(0);
+
+			lvi.Focus(FocusState.Programmatic);
+			await WindowHelper.WaitForIdle();
+
+			Assert.AreEqual(0, sv.VerticalOffset);
+
+			await KeyboardHelper.Down();
+			await WindowHelper.WaitForIdle();
+
+			Assert.AreEqual(0, sv.VerticalOffset);
+
+			await KeyboardHelper.Down();
+			await WindowHelper.WaitForIdle();
+
+			sv.VerticalOffset.Should().BeApproximately(lvi.ActualHeight * 3 - 120, 2);
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
 #if __IOS__ || __ANDROID__
 		[Ignore("Disabled because of animated scrolling, even when explicitly requested")]
 #endif
@@ -2035,7 +2120,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			using var scope = new AssertionScope();
 
-			var scroll = list.FindFirstChild<ScrollViewer>();
+			var scroll = list.FindFirstDescendant<ScrollViewer>();
 			Assert.IsNotNull(scroll);
 
 			dataContextChanged.Should().BeLessThan(5, $"dataContextChanged {dataContextChanged}");
@@ -2094,7 +2179,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			using var scope = new AssertionScope();
 
-			var scroll = list.FindFirstChild<ScrollViewer>();
+			var scroll = list.FindFirstDescendant<ScrollViewer>();
 			Assert.IsNotNull(scroll);
 
 			ScrollTo(list, scroll.ExtentHeight / 2); // Scroll to middle
@@ -2153,7 +2238,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			using var scope = new AssertionScope();
 
-			var scroll = list.FindFirstChild<ScrollViewer>();
+			var scroll = list.FindFirstDescendant<ScrollViewer>();
 			Assert.IsNotNull(scroll);
 			dataContextChanged.Should().BeLessThan(10, $"dataContextChanged {dataContextChanged}");
 
@@ -2828,28 +2913,26 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			await WindowHelper.WaitForLoaded(list);
 
 			var container1 = await WindowHelper.WaitForNonNull(() => list.ContainerFromIndex(0) as ListViewItem);
-			var text1 = container1.FindFirstChild<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
+			var text1 = container1.FindFirstDescendant<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
 			Assert.IsNotNull(text1);
 			Assert.AreEqual(text1.Text, "Selectable A");
 
 			var container2 = await WindowHelper.WaitForNonNull(() => list.ContainerFromIndex(1) as ListViewItem);
-			var text2 = container2.FindFirstChild<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
+			var text2 = container2.FindFirstDescendant<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
 			Assert.IsNotNull(text2);
 			Assert.AreEqual(text2.Text, "Selectable B");
 
 			var container3 = await WindowHelper.WaitForNonNull(() => list.ContainerFromIndex(2) as ListViewItem);
-			var text3 = container3.FindFirstChild<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
+			var text3 = container3.FindFirstDescendant<TextBlock>(tb => tb.Name == "TextBlockInTemplate");
 			Assert.IsNotNull(text3);
 			Assert.AreEqual(text3.Text, "Selectable C");
 		}
 
 		[TestMethod]
-		public async Task When_ItemTemplateSelector_Set_And_Fluent()
+		public async Task When_ItemTemplateSelector_Set_And_Uwp()
 		{
-			using (StyleHelper.UseFluentStyles())
-			{
-				await When_ItemTemplateSelector_Set();
-			}
+			using var _ = StyleHelper.UseUwpStyles();
+			await When_ItemTemplateSelector_Set();
 		}
 
 		[TestMethod]
@@ -2978,7 +3061,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			var secondContainer = await WindowHelper.WaitForNonNull(() => SUT.ContainerFromIndex(1) as ListViewItem);
 			await WindowHelper.WaitForLoaded(secondContainer);
 
-			var tb = secondContainer.FindFirstChild<TextBlock>();
+			var tb = secondContainer.FindFirstDescendant<TextBlock>();
 			Assert.AreEqual("bbb", tb.Text);
 
 			foreach (var item in itemsSource)
@@ -3030,7 +3113,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 				await Task.Delay(5); // The key to reproing the bug is to trigger a relayout asynchronously, while the disappear animation is still in flight
 				var viewToModify = SUT.ContainerFromIndex(3) as ListViewItem;
 				Assert.IsNotNull(viewToModify);
-				var border = viewToModify.FindFirstChild<Border>(b => b.Name == "ItemBorder");
+				var border = viewToModify.FindFirstDescendant<Border>(b => b.Name == "ItemBorder");
 				Assert.IsNotNull(border);
 				border.Width += 20;
 
@@ -3063,6 +3146,32 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			Assert.IsTrue(SUT.Items.Remove(item), "Failed to remove item from ListView.");
 			Assert.IsNull(item.Parent, "The item is still attached to a parent after being removed from ListView.");
+		}
+
+		[TestMethod]
+		public async Task When_Item_Removed_Selection_Stays()
+		{
+			var SUT = new ListView
+			{
+				SelectionMode = ListViewSelectionMode.Single,
+				Items =
+				{
+					new ListViewItem { Content = "Item 1" },
+					new ListViewItem { Content = "Item 2" }
+				}
+			};
+
+			await UITestHelper.Load(SUT);
+
+			SUT.SelectedIndex = 1;
+			await WindowHelper.WaitForIdle();
+
+			SUT.Items.RemoveAt(0);
+			await WindowHelper.WaitForIdle();
+
+			Assert.AreEqual(1, SUT.Items.Count);
+			Assert.AreEqual(0, SUT.SelectedIndex);
+			Assert.AreEqual("Item 2", ((ListViewItem)SUT.Items[0]).Content);
 		}
 
 		[TestMethod]
@@ -3114,10 +3223,10 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			var redLeader = SUT.ContainerFromIndex(0) as ListViewItem;
 			var greenLeader = SUT.ContainerFromIndex(1) as ListViewItem;
-			var redGrid = redLeader.FindFirstChild<CounterGrid>();
-			var greenGrid = greenLeader.FindFirstChild<CounterGrid>();
+			var redGrid = redLeader.FindFirstDescendant<CounterGrid>();
+			var greenGrid = greenLeader.FindFirstDescendant<CounterGrid>();
 
-			var sv = SUT.FindFirstChild<ScrollViewer>();
+			var sv = SUT.FindFirstDescendant<ScrollViewer>();
 
 			sv.ChangeView(null, 100, null, disableAnimation: true);
 			await Task.Delay(20);
@@ -3227,9 +3336,9 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			WindowHelper.WindowContent = SUT;
 			await WindowHelper.WaitForLoaded(SUT);
 
-			var sv = SUT.FindFirstChild<ScrollViewer>();
+			var sv = SUT.FindFirstDescendant<ScrollViewer>();
 			Assert.IsNotNull(sv);
-			var panel = SUT.FindFirstChild<ItemsStackPanel>();
+			var panel = SUT.FindFirstDescendant<ItemsStackPanel>();
 			for (int i = 100; i <= 1000; i += 100)
 			{
 				sv.ChangeView(null, i, null, disableAnimation: true);
@@ -3256,7 +3365,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			}
 
 			var firstContainer = await WindowHelper.WaitForNonNull(() => SUT.ContainerFromIndex(0) as ListViewItem);
-			var textBlock = firstContainer.FindFirstChild<TextBlock>(t => t.Name == "DisplayStringTextBlock");
+			var textBlock = firstContainer.FindFirstDescendant<TextBlock>(t => t.Name == "DisplayStringTextBlock");
 			Assert.AreEqual("Item 1", textBlock.Text);
 
 			Assert.AreEqual(0, sv.VerticalOffset);
@@ -3288,9 +3397,9 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			WindowHelper.WindowContent = SUT;
 			await WindowHelper.WaitForLoaded(SUT);
 
-			var sv = SUT.FindFirstChild<ScrollViewer>();
+			var sv = SUT.FindFirstDescendant<ScrollViewer>();
 			Assert.IsNotNull(sv);
-			var panel = SUT.FindFirstChild<ItemsStackPanel>();
+			var panel = SUT.FindFirstDescendant<ItemsStackPanel>();
 			for (int i = 100; i <= 1000; i += 100)
 			{
 				sv.ChangeView(null, i, null, disableAnimation: true);
@@ -3317,7 +3426,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			}
 
 			var firstContainer = await WindowHelper.WaitForNonNull(() => SUT.ContainerFromIndex(0) as ListViewItem);
-			var textBlock = firstContainer.FindFirstChild<TextBlock>(t => t.Name == "DisplayStringTextBlock");
+			var textBlock = firstContainer.FindFirstDescendant<TextBlock>(t => t.Name == "DisplayStringTextBlock");
 			Assert.AreEqual("Item 0", textBlock.Text);
 
 			Assert.AreEqual(0, sv.VerticalOffset);
@@ -3390,6 +3499,13 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 		}
 
 		[TestMethod]
+		public async Task When_TemplateSelector_And_List_Reloaded_Uwp()
+		{
+			using var uwpStyles = StyleHelper.UseUwpStyles();
+			await When_TemplateSelector_And_List_Reloaded();
+		}
+
+		[TestMethod]
 		public async Task When_List_Given_More_Space()
 		{
 
@@ -3442,6 +3558,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 		}
 
 		[TestMethod]
+		[Ignore("Test fails in CI when Fluent styles are used #18105")]
 		public async Task When_Item_Removed_Then_DataContext_Released()
 		{
 			using (FeatureConfigurationHelper.UseTemplatePooling())
@@ -3632,9 +3749,8 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 #endif
 
 		[TestMethod]
-		[RequiresFullWindow]
 		[RunsOnUIThread]
-		public async Task When_Incremental_Load()
+		public async Task When_Incremental_Load_Default()
 		{
 			const int BatchSize = 25;
 
@@ -3664,28 +3780,29 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			ScrollTo(list, 10000);
 			await Task.Delay(500);
 			await WindowHelper.WaitForIdle();
-			var firstScroll = GetCurrenState();
+			var first = GetCurrenState();
 
 			// scroll to bottom
 			ScrollTo(list, 10000);
 			await Task.Delay(500);
 			await WindowHelper.WaitForIdle();
-			var secondScroll = GetCurrenState();
+			var second = GetCurrenState();
 
-			Assert.AreEqual(BatchSize * 1, initial.LastLoaded, "Should start with first batch loaded.");
-			Assert.AreEqual(BatchSize * 2, firstScroll.LastLoaded, "Should have 2 batches loaded after first scroll.");
-			Assert.IsTrue(initial.LastMaterialized < firstScroll.LastMaterialized, "No extra item materialized after first scroll.");
-			Assert.AreEqual(BatchSize * 3, secondScroll.LastLoaded, "Should have 3 batches loaded after second scroll.");
-			Assert.IsTrue(firstScroll.LastMaterialized < secondScroll.LastMaterialized, "No extra item materialized after second scroll.");
+			Assert.IsTrue(initial.Count / BatchSize > 0, $"Should start with a few batch(es) loaded: count0={initial.Count}");
+			Assert.IsTrue(initial.Count + BatchSize <= first.Count, $"Should have more batch(es) loaded after first scroll: count0={initial.Count}, count1={first.Count}");
+			Assert.IsTrue(initial.LastMaterialized < first.LastMaterialized, $"No extra item materialized after first scroll: index0={initial.LastMaterialized}, index1={first.LastMaterialized}");
+			Assert.IsTrue(first.Count + BatchSize <= second.Count, $"Should have even more batch(es) after second scroll: count1={first.Count}, count2={second.Count}");
+			Assert.IsTrue(first.LastMaterialized < second.LastMaterialized, $"No extra item materialized after second scroll: index1={first.LastMaterialized}, index2={second.LastMaterialized}");
 
-			(int LastLoaded, int LastMaterialized) GetCurrenState() =>
+			(int Count, int LastMaterialized) GetCurrenState() =>
 			(
-				source.LastIndex,
-				Enumerable.Range(0, source.LastIndex).Reverse().FirstOrDefault(x => list.ContainerFromIndex(x) != null)
+				source.Count,
+				Enumerable.Range(0, source.Count).Reverse().FirstOrDefault(x => list.ContainerFromIndex(x) != null)
 			);
 		}
 
 		[TestMethod]
+		[RunsOnUIThread]
 		public async Task When_Incremental_Load_ShouldStop()
 		{
 			const int BatchSize = 25;
@@ -3727,16 +3844,16 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			await WindowHelper.WaitForIdle();
 			var secondScroll = GetCurrenState();
 
-			Assert.AreEqual(BatchSize * 1, initial.LastLoaded, "Should start with first batch loaded.");
-			Assert.AreEqual(BatchSize * 2, firstScroll.LastLoaded, "Should have 2 batches loaded after first scroll.");
-			Assert.IsTrue(initial.LastMaterialized < firstScroll.LastMaterialized, "No extra item materialized after first scroll.");
-			Assert.AreEqual(BatchSize * 2, secondScroll.LastLoaded, "Should still have 2 batches loaded after first scroll since HasMoreItems was false.");
-			Assert.AreEqual(BatchSize * 2 - 1, secondScroll.LastMaterialized, "Last materialized item should be the last from 2nd batch (50th/index=49).");
+			Assert.IsTrue(initial.Count / BatchSize > 0, $"Should start with a few batch(es) loaded: count0={initial.Count}");
+			Assert.IsTrue(initial.Count + BatchSize <= firstScroll.Count, $"Should have more batch(es) loaded after first scroll: count0={initial.Count}, count1={firstScroll.Count}");
+			Assert.IsTrue(initial.LastMaterialized < firstScroll.LastMaterialized, $"No extra item materialized after first scroll: index0={initial.LastMaterialized}, index={firstScroll.LastMaterialized}");
+			Assert.AreEqual(firstScroll.Count, secondScroll.Count, $"Should still have same number of batches after second scroll: count1={firstScroll.Count}, count2={secondScroll.Count}");
+			Assert.AreEqual(firstScroll.Count - 1, secondScroll.LastMaterialized, $"Should reach end of list from first scroll: count1={firstScroll.LastMaterialized}, index2={secondScroll.LastMaterialized}");
 
-			(int LastLoaded, int LastMaterialized) GetCurrenState() =>
+			(int Count, int LastMaterialized) GetCurrenState() =>
 			(
-				source.LastIndex,
-				Enumerable.Range(0, source.LastIndex).Reverse().FirstOrDefault(x => list.ContainerFromIndex(x) != null)
+				source.Count,
+				Enumerable.Range(0, source.Count).Reverse().FirstOrDefault(x => list.ContainerFromIndex(x) != null)
 			);
 		}
 
@@ -3761,7 +3878,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			await Task.Delay(1000);
 
 			// check the listview doesnt already have all items materialized
-			var count = lv.NativePanel?.GetChildren().Count();
+			var count = lv.NativePanel?.EnumerateChildren().Count();
 			Assert.IsTrue(count < source.Length, $"Native ListView is not {(count.HasValue ? $"virtualized (count={count})" : "loaded")}.");
 
 			// scroll to bottom
@@ -3770,7 +3887,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			await WindowHelper.WaitForIdle();
 
 			// check if the last item is now materialized
-			var materialized = lv.NativePanel.GetChildren()
+			var materialized = lv.NativePanel.EnumerateChildren()
 				.Reverse()
 #if __ANDROID__
 				.Select(x => (x as ListViewItem)?.Content as int?)
@@ -3879,7 +3996,7 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			var children =
 #if __ANDROID__ || __IOS__
 				sut is ListView lv
-					? lv.NativePanel.GetChildren()
+					? lv.NativePanel.EnumerateChildren()
 					: sut.ItemsPanelRoot.Children;
 #else
 				sut.ItemsPanelRoot.Children;
@@ -3890,10 +4007,42 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			bool IsVisible(object x) => x is UIElement uie
 				? uie.Visibility == Visibility.Visible
 #if __IOS__
-				: !(x as UIView)?.Hidden ?? false;
+				: !(x as UIKit.UIView)?.Hidden ?? false;
 #else
 				: false;
 #endif
+		}
+
+		[TestMethod]
+#if __ANDROID__ || __IOS__
+		[Ignore("The behaviour of virtualizing panels is only accurate for managed virtualizing panels.")]
+#endif
+		public async Task When_Item_Removed_From_ItemsSource_Item_Removed_From_Tree()
+		{
+			var source = new ObservableCollection<string>()
+			{
+				"1",
+				"2",
+				"3"
+			};
+
+			var SUT = new ListView
+			{
+				ItemsSource = source
+			};
+
+			await UITestHelper.Load(SUT);
+
+			Assert.AreEqual(3, SUT.FindVisualChildByType<ItemsStackPanel>().Children.Count);
+			source.RemoveAt(2);
+			await WindowHelper.WaitForIdle();
+			Assert.AreEqual(2, SUT.FindVisualChildByType<ItemsStackPanel>().Children.Count);
+			source.RemoveAt(1);
+			await WindowHelper.WaitForIdle();
+			Assert.AreEqual(1, SUT.FindVisualChildByType<ItemsStackPanel>().Children.Count);
+			source.RemoveAt(0);
+			await WindowHelper.WaitForIdle();
+			Assert.AreEqual(0, SUT.FindVisualChildByType<ItemsStackPanel>().Children.Count);
 		}
 
 		[TestMethod]
@@ -4003,13 +4152,6 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			Assert.AreEqual("String 1", (string)added3.Single());
 		}
 
-		private sealed class AlwaysEqualClass : IEquatable<AlwaysEqualClass>
-		{
-			public bool Equals(AlwaysEqualClass obj) => true;
-			public override bool Equals(object obj) => true;
-			public override int GetHashCode() => 0;
-		}
-
 		[TestMethod]
 		public async Task When_Items_Are_Equal_But_Different_References_ListView() => await When_Items_Are_Equal_But_Different_References_Common(new ListView());
 
@@ -4022,7 +4164,44 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 		[TestMethod]
 		public async Task When_Items_Are_Equal_But_Different_References_FlipView() => await When_Items_Are_Equal_But_Different_References_Common(new FlipView());
 
-		public record When_Header_DataContext_Model(string MyText);
+		private async Task When_Items_Are_Equal_But_Different_References_Common(Selector sut)
+		{
+			var obj1 = new AlwaysEqualClass();
+			var obj2 = new AlwaysEqualClass();
+			var items = new ObservableCollection<AlwaysEqualClass>(new[]
+			{
+				obj1, obj2
+			});
+			sut.ItemsSource = items;
+			var list = new List<SelectionChangedEventArgs>();
+			sut.SelectionChanged += (_, e) => list.Add(e);
+			sut.SelectedIndex = 1;
+			Assert.AreEqual(1, sut.SelectedIndex);
+			Assert.AreSame(obj2, sut.SelectedItem);
+			sut.SelectedIndex = 0;
+			Assert.AreEqual(0, sut.SelectedIndex);
+			Assert.AreSame(obj1, sut.SelectedItem);
+
+			Assert.AreEqual(2, list.Count);
+			var removed1 = list[0].RemovedItems;
+			var removed2 = list[1].RemovedItems;
+
+			var added1 = list[0].AddedItems;
+			var added2 = list[1].AddedItems;
+
+			if (sut is FlipView)
+			{
+				Assert.AreSame(obj1, removed1.Single());
+			}
+			else
+			{
+				Assert.AreEqual(0, removed1.Count);
+			}
+			Assert.AreSame(obj2, added1.Single());
+
+			Assert.AreSame(obj2, removed2.Single());
+			Assert.AreSame(obj1, added2.Single());
+		}
 
 		[TestMethod]
 		[RunsOnUIThread]
@@ -4112,9 +4291,40 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			Assert.AreEqual(header2.DataContext.ToString(), header2.Text);
 		}
 
+		[TestMethod]
+		[RunsOnUIThread]
+		[DataRow("GridView")]
+		[DataRow("ListView")]
+		public async Task When_Header_With_HeaderTemplate_Only_One_Header_Created(string listViewBaseType)
+		{
+			var SUT = XamlHelper.LoadXaml<ListViewBase>($$"""
+				<{{listViewBaseType}}>
+					<{{listViewBaseType}}.HeaderTemplate>
+						<DataTemplate>
+							<TextBlock x:Name="HeaderTemplateRoot" Text="{Binding}" />
+						</DataTemplate>
+					</{{listViewBaseType}}.HeaderTemplate>
+				</{{listViewBaseType}}>
+			""");
+			SUT.Header = "Header";
+
+			await UITestHelper.Load(SUT);
+
+			var roots = SUT.EnumerateDescendants()
+				.OfType<TextBlock>()
+				.Where(x => x.Name == "HeaderTemplateRoot")
+				.ToArray();
+
+			Assert.AreEqual(1, roots.Length);
+			Assert.AreEqual((string)SUT.Header, roots[0].Text);
+		}
+
 #if HAS_UNO
 		[TestMethod]
 		[RunsOnUIThread]
+#if __WASM__
+		[Ignore("https://github.com/unoplatform/uno/issues/15093")]
+#endif
 		public async Task When_ThemeChange()
 		{
 			const double TotalHeight = 500; // The ListView height.
@@ -4147,25 +4357,51 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			var exploredTextBlocks = new HashSet<TextBlock>();
 			foreach (var listViewItem in GetPanelVisibleChildren(SUT))
 			{
-				var tb = listViewItem.FindFirstChild<TextBlock>();
+				var tb = listViewItem.FindFirstDescendant<TextBlock>();
 				exploredTextBlocks.Add(tb);
 				Assert.AreEqual(Colors.Black, ((SolidColorBrush)tb.Foreground).Color);
 			}
 
 			using (ThemeHelper.UseDarkTheme())
 			{
-				ScrollTo(SUT, NumberOfItemsShownAtATime * ItemHeight);
+				var scrollPosition = NumberOfItemsShownAtATime * ItemHeight;
+
+				ScrollTo(SUT, scrollPosition);
 				await WindowHelper.WaitForIdle();
 				var seenNewTextBlock = false;
 				foreach (var listViewItem in GetPanelVisibleChildren(SUT))
 				{
-					var tb = listViewItem.FindFirstChild<TextBlock>();
+					var tb = listViewItem.FindFirstDescendant<TextBlock>();
 					seenNewTextBlock |= exploredTextBlocks.Add(tb);
 					Assert.AreEqual(Colors.White, ((SolidColorBrush)tb.Foreground).Color);
 				}
 
 				Assert.AreEqual(true, seenNewTextBlock);
 			}
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_GridView_Header_Orientation()
+		{
+			var header = new TextBlock
+			{
+				Text = "0",
+				VerticalAlignment = VerticalAlignment.Bottom
+			};
+
+			var SUT = new GridView
+			{
+				ItemsSource = "12345",
+				Header = header
+			};
+
+			await UITestHelper.Load(SUT);
+
+			var item1 = SUT.ContainerFromIndex(0).FindVisualChildByType<TextBlock>();
+			Assert.AreEqual("1", item1.Text);
+
+			header.GetAbsoluteBounds().Y.Should().BeLessThan(item1.GetAbsoluteBounds().Y);
 		}
 
 		[TestMethod]
@@ -4216,43 +4452,390 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 		}
 #endif
 
-		private async Task When_Items_Are_Equal_But_Different_References_Common(Selector sut)
+#if __IOS__
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_HeaderDataContext_Cleared_FromNavigation()
 		{
-			var obj1 = new AlwaysEqualClass();
-			var obj2 = new AlwaysEqualClass();
-			var items = new ObservableCollection<AlwaysEqualClass>(new[]
+			var frame = new Frame();
+
+			WindowHelper.WindowContent = frame;
+			await WindowHelper.WaitFor(() => frame.IsLoaded);
+			await WindowHelper.WaitForIdle();
+
+			frame.Navigate(typeof(When_HeaderDataContext_Cleared_FromNavigation_Page));
+			await WindowHelper.WaitForIdle();
+
+			var page = (When_HeaderDataContext_Cleared_FromNavigation_Page)frame.Content;
+			var sut = frame.FindFirstDescendant<ListView>();
+			var panel = (NativeListViewBase)sut.InternalItemsPanelRoot;
+
+			page.LvHeaderDcChanged += (s, e) => { /* for debugging */ };
+			Assert.IsNotNull(page.DataContext);
+
+			for (var i = 0; i < 3; i++) // may not always trigger, but 3 times is usually more than enough
 			{
-				obj1, obj2
-			});
-			sut.ItemsSource = items;
-			var list = new List<SelectionChangedEventArgs>();
-			sut.SelectionChanged += (_, e) => list.Add(e);
-			sut.SelectedIndex = 1;
-			Assert.AreEqual(1, sut.SelectedIndex);
-			Assert.AreSame(obj2, sut.SelectedItem);
-			sut.SelectedIndex = 0;
-			Assert.AreEqual(0, sut.SelectedIndex);
-			Assert.AreSame(obj1, sut.SelectedItem);
+				// scroll header out of viewport and back in
+				ScrollTo(sut, 100000);
+				await WindowHelper.WaitForIdle();
+				await Task.Delay(1000);
+				ScrollTo(sut, 0);
+				await WindowHelper.WaitForIdle();
+				await Task.Delay(1000);
 
-			Assert.AreEqual(2, list.Count);
-			var removed1 = list[0].RemovedItems;
-			var removed2 = list[1].RemovedItems;
+				// frame navigate away and back
+				frame.Navigate(typeof(BackNavigationPage));
+				await WindowHelper.WaitForIdle();
+				await Task.Delay(1000);
+				frame.GoBack();
+				await WindowHelper.WaitForIdle();
 
-			var added1 = list[0].AddedItems;
-			var added2 = list[1].AddedItems;
-
-			if (sut is FlipView)
-			{
-				Assert.AreSame(obj1, removed1.Single());
+				// check if data-context is still set
+				Assert.AreEqual(GetListViewHeader()?.DataContext, page.DataContext);
 			}
-			else
-			{
-				Assert.AreEqual(0, removed1.Count);
-			}
-			Assert.AreSame(obj2, added1.Single());
 
-			Assert.AreSame(obj2, removed2.Single());
-			Assert.AreSame(obj1, added2.Single());
+			UIElement GetListViewHeader() => (panel.GetSupplementaryView(NativeListViewBase.ListViewHeaderElementKindNS, global::Foundation.NSIndexPath.FromRowSection(0, 0)) as ListViewBaseInternalContainer)?.Content;
+		}
+#endif
+
+		[TestMethod]
+		[RunsOnUIThread]
+#if __MACOS__
+		[Ignore("NotImplemented ListViewBase.ScrollIntoView")]
+#endif
+		public Task When_SelectionChanged_Item_Is_BroughtIntoView_ListView() => When_SelectionChanged_Item_Is_BroughtIntoView<ListView>();
+
+		[TestMethod]
+		[RunsOnUIThread]
+#if __MACOS__
+		[Ignore("NotImplemented ListViewBase.ScrollIntoView")]
+#endif
+		public Task When_SelectionChanged_Item_Is_BroughtIntoView_TabView() => When_SelectionChanged_Item_Is_BroughtIntoView<TabView>();
+
+		public async Task When_SelectionChanged_Item_Is_BroughtIntoView<T>() where T : FrameworkElement, new()
+		{
+			var source = Enumerable.Range(0, 100)
+				.Select(x => typeof(T) == typeof(TabView)
+					? (object)new TabViewItem { Header = x, Content = $"Content of {x}" }
+					: x)
+				.ToArray();
+			var setup = CreateSetup();
+
+			await UITestHelper.Load(setup);
+			await Task.Delay(1000);
+
+			SetSelectedItem(source.ElementAt(50));
+			await WindowHelper.WaitForIdle();
+			await Task.Delay(1000);
+
+			var lv = setup as ListView ?? setup.FindFirstDescendant<ListView>(); // get the LV itself, or the TabListView within TabView used for header
+			var sv = lv.FindFirstDescendant<ScrollViewer>();
+			var container = lv.ContainerFromIndex(50) as ContentControl;
+
+			var offset = container.TransformToVisual(lv).TransformPoint(default);
+			var (offsetStart, vpExtent) = setup is TabView
+				? (offset.X, sv.ViewportWidth) // horizontal
+				: (offset.Y, sv.ViewportHeight); // vertical
+
+			Assert.IsTrue(0 <= offsetStart && offsetStart <= vpExtent, $"Container#50 should be within viewport: 0 <= {offsetStart} <= {vpExtent}");
+
+			FrameworkElement CreateSetup() => typeof(T).Name switch
+			{
+				nameof(ListView) => new ListView { Width = 400, Height = 200, ItemsSource = source },
+				nameof(TabView) => new TabView { Width = 400, Height = 200, TabItemsSource = source },
+
+				_ => throw new ArgumentOutOfRangeException($"Generic arg not accepted: {typeof(T).Name}")
+			};
+			void SetSelectedItem(object item)
+			{
+				if (setup is ListView lv) { lv.SelectedItem = item; }
+				else if (setup is TabView tv) { tv.SelectedItem = item; }
+				else { throw new NotImplementedException(); }
+			}
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
+#if __MACOS__
+		[Ignore("NotImplemented ListViewBase.ScrollIntoView")]
+#elif __ANDROID__ || __IOS__
+		[Ignore("This test is for managed ListViewBase.")]
+#endif
+		public async Task When_ScrollIntoView_No_Virtualization()
+		{
+			var source = Enumerable.Range(0, 100).ToArray();
+			var lv = new ListView { Width = 400, Height = 200, ItemsSource = source };
+
+			await UITestHelper.Load(lv);
+
+			lv.ScrollIntoView(source[50]);
+			await WindowHelper.WaitForIdle();
+
+			var sv = lv.FindFirstDescendant<ScrollViewer>();
+			var container = (ContentControl)lv.ContainerFromIndex(50);
+
+			var offset = container.TransformToVisual(lv).TransformPoint(default);
+			var (offsetStart, vpExtent) = (offset.Y, sv.ViewportHeight);
+
+			Assert.IsTrue(0 <= offsetStart && offsetStart + container.ActualHeight <= vpExtent, $"Container#50 should be within viewport: 0 <= {offsetStart} <= {vpExtent}");
+		}
+
+#if HAS_UNO
+		[TestMethod]
+		[RunsOnUIThread]
+#if __MACOS__
+		[Ignore("NotImplemented ListViewBase.ScrollIntoView")]
+#else
+		[Ignore("https://github.com/unoplatform/uno/issues/16246")]
+#endif
+		public async Task When_ScrollIntoView_Containers_With_Varying_Heights()
+		{
+			var random = new Random(42);
+			var lv = new ListView
+			{
+				Height = 400,
+				ItemsSource = Enumerable.Range(0, 100).Select(i => $"item {i}" + new string('\n', random.Next(0, 5))).ToArray(),
+				ItemTemplate = new DataTemplate(() =>
+				{
+					var tb = new TextBlock();
+					tb.SetBinding(TextBlock.TextProperty, new Binding());
+
+					return new StackPanel
+					{
+						Padding = new Thickness(16),
+						Children =
+						{
+							tb
+						}
+					};
+				})
+			};
+
+			await UITestHelper.Load(lv);
+
+			var sv = lv.FindFirstDescendant<ScrollViewer>();
+			var i = 7049.5;
+			while (i > 0)
+			{
+				sv.ScrollToVerticalOffset(i);
+				await WindowHelper.WaitForIdle();
+				i -= 400;
+				// try i -= 800, it will also fail the test even though visually, item 0 is visible, but the list view is interally corrupted
+			}
+
+			sv.ScrollToVerticalOffset(i);
+			await WindowHelper.WaitForIdle();
+
+			Assert.IsNotNull(lv.ContainerFromItem(0));
+		}
+#endif
+
+#if HAS_UNO
+		[TestMethod]
+		[RunsOnUIThread]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
+#elif __WASM__
+		[Ignore("Failing on WASM: https://github.com/unoplatform/uno/issues/17742")]
+#endif
+		public async Task When_UpdateLayout_In_DragDropping()
+		{
+			var SUT = new ListView
+			{
+				AllowDrop = true,
+				CanDragItems = true,
+				CanReorderItems = true
+			};
+
+			for (var i = 0; i < 3; i++)
+			{
+				SUT.Items.Add(new UpdateLayoutOnUnloadedControl
+				{
+					Content = new TextBlock
+					{
+						AllowDrop = true,
+						Height = 100,
+						Text = i.ToString()
+					}
+				});
+			}
+
+			await UITestHelper.Load(SUT);
+
+			var injector = InputInjector.TryCreate() ?? throw new InvalidOperationException("Failed to init the InputInjector");
+			using var mouse = injector.GetMouse();
+
+			// drag(pick-up) item#0
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().GetCenter() with { Y = SUT.GetAbsoluteBoundsRect().Y + 50 });
+			await WindowHelper.WaitForIdle();
+			mouse.Press();
+			await WindowHelper.WaitForIdle();
+
+			// drop onto item#1
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().GetCenter() with { Y = SUT.GetAbsoluteBoundsRect().Y + 100 }, 1);
+			await WindowHelper.WaitForIdle();
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().GetCenter() with { Y = SUT.GetAbsoluteBoundsRect().Y + 150 }, 1);
+			await WindowHelper.WaitForIdle();
+			mouse.Release();
+			await WindowHelper.WaitForIdle();
+
+			var textBlocks = SUT.FindFirstDescendant<ItemsStackPanel>().Children
+				.Select(c => c.FindFirstDescendant<TextBlock>())
+				.OrderBy(c => c.GetAbsoluteBoundsRect().Y)
+				.ToList();
+			Assert.AreEqual("1", textBlocks[0].Text);
+			Assert.AreEqual("0", textBlocks[1].Text);
+			Assert.AreEqual("2", textBlocks[2].Text);
+		}
+#endif
+
+#if HAS_UNO
+		[TestMethod]
+		[RunsOnUIThread]
+#if !HAS_INPUT_INJECTOR
+		[Ignore("InputInjector is not supported on this platform.")]
+#elif __WASM__
+		[Ignore("Failing on WASM https://github.com/unoplatform/uno/issues/17742")]
+#endif
+		public async Task When_DragDrop_ItemsSource_Is_Subclass_Of_ObservableCollection()
+		{
+			var SUT = new ListView
+			{
+				AllowDrop = true,
+				CanDragItems = true,
+				CanReorderItems = true,
+				ItemsSource = new SubclassOfObservableCollection
+				{
+					"0",
+					"1",
+					"2"
+				}
+			};
+
+			await UITestHelper.Load(SUT);
+
+			var injector = InputInjector.TryCreate() ?? throw new InvalidOperationException("Failed to init the InputInjector");
+			using var mouse = injector.GetMouse();
+
+			// drag(pick-up) item#0
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().Location + new Point(20, SUT.ActualHeight / 6));
+			await WindowHelper.WaitForIdle();
+			mouse.Press();
+			await WindowHelper.WaitForIdle();
+
+			// drop onto item#1
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().Location + new Point(20, SUT.ActualHeight * 2 / 6));
+			await WindowHelper.WaitForIdle();
+			mouse.MoveTo(SUT.GetAbsoluteBoundsRect().Location + new Point(20, SUT.ActualHeight * 3 / 6));
+			await WindowHelper.WaitForIdle();
+			mouse.Release();
+			await WindowHelper.WaitForIdle();
+
+			var textBlocks = SUT.FindFirstDescendant<ItemsStackPanel>().Children
+				.Select(c => c.FindFirstDescendant<TextBlock>())
+				.OrderBy(c => c.GetAbsoluteBoundsRect().Y)
+				.ToList();
+			Assert.AreEqual("1", textBlocks[0].Text);
+			Assert.AreEqual("0", textBlocks[1].Text);
+			Assert.AreEqual("2", textBlocks[2].Text);
+		}
+#endif
+
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_ScrollIntoView_FreshlyAddedDefaultItem() // checks against #17695
+		{
+			var source = new ObservableCollection<string>();
+			var sut = new ListView
+			{
+				ItemsSource = source,
+			};
+
+			await UITestHelper.Load(sut, x => x.IsLoaded); // custom criteria to prevent empty listview failure
+
+			void AddItem(string item, bool select = false)
+			{
+				source.Add(item);
+				if (select)
+				{
+					sut.SelectedItem = item;
+				}
+			}
+
+			// We just assume here that there is enough space to display 3 items.
+			// Here we are testing if adding a new items and immediately selecting it
+			// doesn't result in a listview with missing items in the viewport.
+			AddItem($"Item 1", select: true);
+			await Task.Delay(10);
+			AddItem($"Item 2", select: false);
+			await Task.Delay(10);
+			AddItem($"Item 3", select: true);
+
+			await UITestHelper.WaitForIdle();
+
+			var tree = sut.TreeGraph();
+#if !__ANDROID__
+			var panel = sut.FindFirstDescendant<ItemsStackPanel>() ?? throw new Exception("Failed to find the ListView's Panel (ItemsStackPanel)");
+			Assert.AreEqual(3, panel.Children.Count);
+#else
+			var count = sut.MaterializedContainers.Count();
+			Assert.AreEqual(3, count);
+#endif
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
+#if __ANDROID__
+		[Ignore("droid: Scrollable/Extent-Height doesnt get updated until manually scroll occurs, but otherwise the visuals are good.")]
+#endif
+		public async Task When_ScrollIntoView_FreshlyAddedOffscreenItem()
+		{
+			const int FixedItemHeight = 29;
+
+			var source = new ObservableCollection<string>();
+			var sut = new ListView
+			{
+				ItemsSource = source,
+				ItemTemplate = FixedSizeItemTemplate, // height=29
+			};
+
+			await UITestHelper.Load(sut, x => x.IsLoaded); // custom criteria to prevent empty listview failure
+
+			void AddItem(string item, bool select = false)
+			{
+				source.Add(item);
+				if (select)
+				{
+					sut.SelectedItem = item;
+				}
+			}
+
+			// Fill the source with enough enough items to fill the available height.
+			// Rounding up to the next tens, so we always start counting from XX1 XX2 XX3 for next step
+			var fulfillSize = Math.Round(sut.XamlRoot.Size.Height / FixedItemHeight / 10, MidpointRounding.ToPositiveInfinity) * 10 + 10;
+			for (int i = 0; i < fulfillSize; i++)
+			{
+				AddItem($"Item {i + 1}", select: false);
+			}
+
+			AddItem($"Item {fulfillSize + 1}", select: true);
+			await Task.Delay(10);
+			AddItem($"Item {fulfillSize + 2}", select: false);
+			await Task.Delay(10);
+			AddItem($"Item {fulfillSize + 3}", select: true);
+
+			await UITestHelper.WaitForIdle();
+
+			//var tree = sut.TreeGraph();
+			var sv = sut.FindFirstDescendant<ScrollViewer>() ?? throw new Exception("Failed to find the ListView's ScrollViewer");
+
+			// Here we aren't verifying the viewport is entirely filled,
+			// But the last 3 are materialized, and that we are scrolled to the end.
+			Assert.IsNotNull(sut.ContainerFromIndex(source.Count - 3), "Container#n-3 is null");
+			Assert.IsNotNull(sut.ContainerFromIndex(source.Count - 2), "Container#n-2 is null");
+			Assert.IsNotNull(sut.ContainerFromIndex(source.Count - 1), "Container#n-1 is null");
+
+			Assert.AreEqual(sv.ScrollableHeight, sv.VerticalOffset, "ListView is not scrolled to the end.");
 		}
 	}
 
@@ -4427,8 +5010,6 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			}
 
 			public bool HasMoreItems { get; set; } = true;
-
-			public int LastIndex => _start;
 		}
 
 		private record TestReleaseObject()
@@ -4521,6 +5102,68 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 			protected override DataTemplate SelectTemplateCore(object item, DependencyObject container) => SelectTemplateCore(item);
 			protected override DataTemplate SelectTemplateCore(object item) => _impl(item);
 		}
+
+		public record When_Header_DataContext_Model(string MyText);
+
+		private sealed class AlwaysEqualClass : IEquatable<AlwaysEqualClass>
+		{
+			public bool Equals(AlwaysEqualClass obj) => true;
+			public override bool Equals(object obj) => true;
+			public override int GetHashCode() => 0;
+		}
+
+#if HAS_UNO
+		public partial class When_HeaderDataContext_Cleared_FromNavigation_Page : Page
+		{
+			public event TypedEventHandler<FrameworkElement, DataContextChangedEventArgs> LvHeaderDcChanged;
+
+			public When_HeaderDataContext_Cleared_FromNavigation_Page()
+			{
+				DataContext = "MainVM";
+				Content = new Grid
+				{
+					RowDefinitions =
+					{
+						new() { Height = new GridLength(1, GridUnitType.Auto) },
+						new() { Height = new GridLength(1, GridUnitType.Star) },
+					},
+					Children =
+					{
+						new Button { Content = "Next" }.Apply(x =>
+						{
+							Grid.SetRow(x, 0);
+							x.Click += (s, e) => Frame.Navigate(typeof(BackNavigationPage));
+						}),
+						new ListView
+						{
+							ItemsSource = Enumerable.Range(0, 200).Select(x => $"asd {x}"),
+							HeaderTemplate = new DataTemplate(() => new StackPanel
+							{
+								new TextBlock() { Text = "header" },
+								new TextBlock().Apply(x => x.SetBinding(TextBlock.TextProperty, new Binding())),
+							}.Apply(x => x.DataContextChanged += (s, e) => LvHeaderDcChanged?.Invoke(s, e))),
+						}.Apply(x => Grid.SetRow(x, 1)),
+					},
+				};
+			}
+		}
+#endif
+
+		public partial class BackNavigationPage : Page
+		{
+			public BackNavigationPage()
+			{
+				Content = new Button().Apply(x => x.Click += (s, e) => Frame.GoBack());
+			}
+		}
+
+		public partial class UpdateLayoutOnUnloadedControl : UserControl
+		{
+			public UpdateLayoutOnUnloadedControl()
+			{
+				Unloaded += (_, _) => UpdateLayout();
+			}
+		}
 	}
 
 	public partial class Given_ListViewBase // helpers
@@ -4595,16 +5238,30 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls
 
 			Assert.IsFalse(reference.IsAlive);
 		}
-	}
 
-	public partial class OnItemsChangedListView : ListView
-	{
-		public Action ItemsChangedAction;
-
-		protected override void OnItemsChanged(object e)
+		public partial class OnItemsChangedListView : ListView
 		{
-			base.OnItemsChanged(e);
-			ItemsChangedAction?.Invoke();
+			public Action ItemsChangedAction;
+
+			protected override void OnItemsChanged(object e)
+			{
+				base.OnItemsChanged(e);
+				ItemsChangedAction?.Invoke();
+			}
+		}
+
+		public class ViewItem : List<string>
+		{
+			public string Name { get; set; }
+
+			public override string ToString()
+			{
+				return Name;
+			}
+		}
+
+		public class SubclassOfObservableCollection : ObservableCollection<string>
+		{
 		}
 	}
 }

@@ -11,20 +11,19 @@ using SkiaSharp;
 using Uno.UI.Composition;
 using Windows.Graphics.Display;
 
-namespace Windows.UI.Composition
+namespace Microsoft.UI.Composition
 {
 	public partial class CompositionVisualSurface : CompositionObject, ICompositionSurface, ISkiaSurface
 	{
 		private SKSurface? _surface;
-		private DrawingSession? _drawingSession;
 
 		SKSurface? ISkiaSurface.Surface { get => _surface; }
 
 		void ISkiaSurface.UpdateSurface(bool recreateSurface)
 		{
-			if (_surface is null || _drawingSession is null || recreateSurface)
+			SKCanvas? canvas = null;
+			if (_surface is null || recreateSurface)
 			{
-				_drawingSession?.Dispose();
 				_surface?.Dispose();
 
 				Vector2 size = SourceSize switch
@@ -39,34 +38,37 @@ namespace Windows.UI.Composition
 
 				var info = new SKImageInfo((int)size.X, (int)size.Y, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
 				_surface = SKSurface.Create(info);
-				_drawingSession = new DrawingSession(_surface, DrawingFilters.Default);
+				canvas = _surface.Canvas;
 			}
+
+			canvas ??= _surface.Canvas;
 
 			if (SourceVisual is not null && _surface is not null)
 			{
-				_surface.Canvas.Clear();
-				if (SourceOffset != default)
-				{
-					_surface.Canvas.Translate(-SourceOffset.X, -SourceOffset.Y);
-				}
+				canvas.Clear();
 
-				SourceVisual.Draw(_drawingSession.Value);
+				var previousCompMode = Compositor.IsSoftwareRenderer;
+				Compositor.IsSoftwareRenderer = true;
+				SourceVisual.RenderRootVisual(_surface, SourceOffset, null);
+				Compositor.IsSoftwareRenderer = previousCompMode;
 			}
 		}
 
-		void ISkiaSurface.UpdateSurface(in DrawingSession session)
+		void ISkiaSurface.UpdateSurface(in Visual.PaintingSession session)
 		{
-			if (SourceVisual is not null && session.Surface is not null)
+			if (SourceVisual is not null && session.Canvas is not null)
 			{
-				int save = session.Surface.Canvas.Save();
+				int save = session.Canvas.Save();
 				if (SourceOffset != default)
 				{
-					session.Surface.Canvas.Translate(-SourceOffset.X, -SourceOffset.Y);
-					session.Surface.Canvas.ClipRect(new SKRect(SourceOffset.X, SourceOffset.Y, session.Surface.Canvas.DeviceClipBounds.Width, session.Surface.Canvas.DeviceClipBounds.Height));
+					// clip to the left of and above the origin (in local coordinates).
+					// Note that this is applied before the SourceOffset translates the canvas' matrix, so
+					// when the translation happens, the drawing will be clipped by the SourceOffset.
+					session.Canvas.ClipRect(new SKRect(0, 0, int.MaxValue, int.MaxValue));
 				}
 
-				SourceVisual.Draw(in session);
-				session.Surface.Canvas.RestoreToCount(save);
+				SourceVisual.RenderRootVisual(session.Surface, SourceOffset, null);
+				session.Canvas.RestoreToCount(save);
 			}
 		}
 
@@ -74,7 +76,6 @@ namespace Windows.UI.Composition
 		{
 			base.Dispose();
 
-			_drawingSession?.Dispose();
 			_surface?.Dispose();
 		}
 

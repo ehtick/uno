@@ -6,16 +6,18 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Windows.Foundation;
 using Windows.Storage.Streams;
-using Windows.UI.Composition;
-using Windows.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Composition;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Uno.UI.Composition;
 using Windows.Graphics.Display;
+using Uno.UI.Dispatching;
+using Uno.Helpers;
+using System.Threading;
 
-namespace Windows.UI.Xaml.Media
+namespace Microsoft.UI.Xaml.Media
 {
 	public partial class LoadedImageSurface : IDisposable, ICompositionSurface, ISkiaCompositionSurfaceProvider
 	{
-		private HttpClient? _httpClient;
 		private double _dpi = DisplayInformation.GetForCurrentView().RawPixelsPerViewPixel;
 
 		internal SkiaCompositionSurface? InternalSurface;
@@ -29,6 +31,14 @@ namespace Windows.UI.Xaml.Media
 
 		public static LoadedImageSurface StartLoadFromUri(Uri uri) => StartLoadFromUri(uri, null, null);
 		public static LoadedImageSurface StartLoadFromUri(Uri uri, Size desiredMaxSize) => StartLoadFromUri(uri, (int)desiredMaxSize.Width, (int)desiredMaxSize.Height);
+
+		private void RaiseLoadCompleted(LoadedImageSourceLoadStatus status)
+		{
+			if (LoadCompleted is not null)
+			{
+				NativeDispatcher.Main.Enqueue(() => LoadCompleted.Invoke(this, new(status)));
+			}
+		}
 
 		private static LoadedImageSurface StartLoadFromUri(Uri uri, int? width, int? height)
 		{
@@ -49,7 +59,7 @@ namespace Windows.UI.Xaml.Media
 							uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
 							uri.IsFile)
 						{
-							stream = await imgSurf.OpenStreamFromUriAsync(uri);
+							stream = await ImageSourceHelpers.OpenStreamFromUriAsync(uri, CancellationToken.None);
 						}
 						else if (uri.Scheme.Equals("ms-appx", StringComparison.OrdinalIgnoreCase))
 						{
@@ -70,10 +80,7 @@ namespace Windows.UI.Xaml.Media
 					}
 					catch
 					{
-						if (imgSurf.LoadCompleted is not null)
-						{
-							imgSurf.LoadCompleted(imgSurf, new LoadedImageSourceLoadCompletedEventArgs(LoadedImageSourceLoadStatus.NetworkError));
-						}
+						imgSurf.RaiseLoadCompleted(LoadedImageSourceLoadStatus.NetworkError);
 					}
 
 					if (stream is not null)
@@ -90,16 +97,13 @@ namespace Windows.UI.Xaml.Media
 							imgSurf._naturalPhysicalSize = imgSurf._decodedPhysicalSize;
 						}
 
-						if (imgSurf.LoadCompleted is not null)
-						{
-							imgSurf.LoadCompleted(imgSurf, new LoadedImageSourceLoadCompletedEventArgs(result.success ? LoadedImageSourceLoadStatus.Success : LoadedImageSourceLoadStatus.InvalidFormat));
-						}
+						imgSurf.RaiseLoadCompleted(result.success ? LoadedImageSourceLoadStatus.Success : LoadedImageSourceLoadStatus.InvalidFormat);
 
 						stream.Dispose();
 					}
 					else
 					{
-						imgSurf.LoadCompleted?.Invoke(imgSurf, new LoadedImageSourceLoadCompletedEventArgs(LoadedImageSourceLoadStatus.Other));
+						imgSurf.RaiseLoadCompleted(LoadedImageSourceLoadStatus.Other);
 					}
 				}
 				else
@@ -130,7 +134,7 @@ namespace Windows.UI.Xaml.Media
 					imgSurf._naturalPhysicalSize = imgSurf._decodedPhysicalSize;
 				}
 
-				imgSurf.LoadCompleted?.Invoke(imgSurf, new LoadedImageSourceLoadCompletedEventArgs(result.success ? LoadedImageSourceLoadStatus.Success : LoadedImageSourceLoadStatus.InvalidFormat));
+				imgSurf.RaiseLoadCompleted(result.success ? LoadedImageSourceLoadStatus.Success : LoadedImageSourceLoadStatus.InvalidFormat);
 			});
 
 			return retVal;
@@ -138,20 +142,7 @@ namespace Windows.UI.Xaml.Media
 
 		public void Dispose()
 		{
-			_httpClient?.Dispose();
 			InternalSurface?.Image?.Dispose();
-		}
-
-		private async Task<Stream> OpenStreamFromUriAsync(Uri uri)
-		{
-			if (uri.IsFile)
-			{
-				return File.Open(uri.LocalPath, FileMode.Open);
-			}
-
-			_httpClient ??= new HttpClient();
-			var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseContentRead);
-			return await response.Content.ReadAsStreamAsync();
 		}
 	}
 }

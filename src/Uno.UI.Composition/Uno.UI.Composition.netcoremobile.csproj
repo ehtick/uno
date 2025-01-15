@@ -26,11 +26,9 @@
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(TargetPlatformIdentifier)' == 'android'">
-		<PackageReference Include="Xamarin.AndroidX.Legacy.Support.v4" />
 		<PackageReference Include="Xamarin.AndroidX.AppCompat" />
 		<PackageReference Include="Xamarin.AndroidX.Fragment" />
 	</ItemGroup>
-
 
 	<ItemGroup>
 		<ProjectReference Include="..\Uno.UWP\Uno.netcoremobile.csproj" />

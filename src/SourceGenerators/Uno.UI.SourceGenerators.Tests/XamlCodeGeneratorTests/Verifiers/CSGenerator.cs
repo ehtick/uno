@@ -1,9 +1,10 @@
 ﻿// Uncomment the following line to write expected files to disk
 // Don't commit this line uncommented.
-//#define WRITE_EXPECTED
+// #define WRITE_EXPECTED
 
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using CommunityToolkit.Mvvm.SourceGenerators;
@@ -16,6 +17,8 @@ using Uno.UI.SourceGenerators.XamlGenerator;
 namespace Uno.UI.SourceGenerators.Tests.Verifiers
 {
 	public record struct XamlFile(string FileName, string Contents);
+
+	public record struct ResourceFile(string Locale, string FileName, string Contents);
 
 	public class TestSetup
 	{
@@ -66,6 +69,11 @@ namespace Uno.UI.SourceGenerators.Tests.Verifiers
 			{
 			}
 
+			public Test(XamlFile[] xamlFiles, ResourceFile[] resourceFiles, [CallerFilePath] string testFilePath = "", [CallerMemberName] string testMethodName = "")
+				: base(xamlFiles, resourceFiles, testFilePath, ShortName(testMethodName))
+			{
+			}
+
 			private static string ShortName(string name)
 				=> new string(name.Where(char.IsUpper).ToArray()); // We use only upper-cased char to reduce length of filename push to git
 		}
@@ -76,44 +84,120 @@ namespace Uno.UI.SourceGenerators.Tests.Verifiers
 			private readonly string _testMethodName;
 			private const string TestOutputFolderName = "Out";
 
+			private readonly XamlFile[] _xamlFiles;
+			private readonly ResourceFile[] _resourceFiles;
+
 			public bool EnableFuzzyMatching { get; set; } = true;
 			public bool DisableBuildReferences { get; set; }
-			public string? XamlIncludedNamespaces { get; set; }
+			public Dictionary<string, string>? GlobalConfigOverride { get; set; }
 
 			protected TestBase(XamlFile xamlFile, [CallerFilePath] string testFilePath = "", [CallerMemberName] string testMethodName = "")
-				: this(new[] { xamlFile }, testFilePath, testMethodName)
+				: this([xamlFile], testFilePath, testMethodName)
 			{
 			}
 
 			protected TestBase(XamlFile[] xamlFiles, string testFilePath, string testMethodName)
+				: this(xamlFiles, [], testFilePath, testMethodName)
 			{
+			}
+
+			protected TestBase(XamlFile[] xamlFiles, ResourceFile[] resourceFiles, string testFilePath, string testMethodName)
+			{
+				_xamlFiles = xamlFiles;
+				_resourceFiles = resourceFiles;
 				_testFilePath = testFilePath;
 				_testMethodName = testMethodName;
 
-				// For now, there is no need to customize these for each test.
-				var globalConfigBuilder = new StringBuilder("""
-					is_global = true
-					build_property.MSBuildProjectFullPath = C:\Project\Project.csproj
-					build_property.RootNamespace = MyProject
-					build_property.UnoForceHotReloadCodeGen = false
-					build_property.UnoEnableXamlFuzzyMatching = false
-					build_property.IncludeXamlNamespacesProperty = android
-					""").AppendLine();
+				ReferenceAssemblies = _Dotnet.Current.ReferenceAssemblies;
 
-				foreach (var xamlFile in xamlFiles)
+#if WRITE_EXPECTED
+				TestBehaviors |= TestBehaviors.SkipGeneratedSourcesCheck;
+#endif
+			}
+
+			protected override async Task RunImplAsync(CancellationToken cancellationToken)
+			{
+				string? includeXamlNamespaces = null;
+				string? excludeXamlNamespaces = null;
+				if (ReferenceAssemblies.Packages.Any(p => p.Id.StartsWith("Microsoft.Android.Ref", StringComparison.OrdinalIgnoreCase)))
+				{
+					includeXamlNamespaces = "android,not_ios,not_wasm,not_macos,not_skia,not_netstdref";
+					excludeXamlNamespaces = "ios,wasm,macos,skia,not_android";
+				}
+				else if (ReferenceAssemblies.Packages.Any(p =>
+					p.Id.StartsWith("Microsoft.iOS.Ref", StringComparison.OrdinalIgnoreCase) ||
+					p.Id.StartsWith("Microsoft.tvOS.Ref", StringComparison.OrdinalIgnoreCase) ||
+					p.Id.StartsWith("Microsoft.MacCatalyst.Ref", StringComparison.OrdinalIgnoreCase)))
+				{
+					includeXamlNamespaces = "ios,not_android,not_wasm,not_macos,not_skia,not_netstdref";
+					excludeXamlNamespaces = "android,wasm,macos,skia,not_ios";
+				}
+				else if (ReferenceAssemblies.Packages.Any(p => p.Id.StartsWith("Microsoft.macOS.Ref", StringComparison.OrdinalIgnoreCase)))
+				{
+					includeXamlNamespaces = "macos,not_android,not_wasm,not_ios,not_skia,not_netstdref";
+					excludeXamlNamespaces = "android,ios,wasm,skia,not_macos";
+				}
+
+				var defaultConfig = new Dictionary<string, string>
+				{
+					{ "is_global", "true" },
+					{ "build_property.MSBuildProjectFullPath", "C:\\Project\\Project.csproj" },
+					{ "build_property.RootNamespace", "MyProject" },
+					{ "build_property.UnoForceHotReloadCodeGen", "false" },
+					{ "build_property.UnoEnableXamlFuzzyMatching", "false" },
+				};
+
+				if (includeXamlNamespaces is not null)
+				{
+					defaultConfig.Add("build_property.IncludeXamlNamespacesProperty", includeXamlNamespaces);
+				}
+
+				if (excludeXamlNamespaces is not null)
+				{
+					defaultConfig.Add("build_property.ExcludeXamlNamespacesProperty", excludeXamlNamespaces);
+				}
+
+				var globalConfigOverride = GlobalConfigOverride;
+				if (globalConfigOverride is null)
+				{
+					globalConfigOverride = new Dictionary<string, string>();
+				}
+
+				var globalConfigBuilder = new StringBuilder();
+
+				foreach (var (key, value) in defaultConfig)
+				{
+					if (!globalConfigOverride.ContainsKey(key))
+					{
+						globalConfigBuilder.AppendLine($"{key} = {value}");
+					}
+				}
+
+				foreach (var (key, value) in globalConfigOverride)
+				{
+					globalConfigBuilder.AppendLine($"{key} = {value}");
+				}
+
+				globalConfigBuilder.AppendLine();
+
+				foreach (var xamlFile in _xamlFiles)
 				{
 					globalConfigBuilder.Append($@"[C:/Project/0/{xamlFile.FileName}]
 build_metadata.AdditionalFiles.SourceItemGroup = Page
 ");
 					TestState.AdditionalFiles.Add(($"C:/Project/0/{xamlFile.FileName}", xamlFile.Contents));
 				}
+
+				foreach (var resourceFile in _resourceFiles)
+				{
+					globalConfigBuilder.Append($@"[C:/Project/0/Strings/{resourceFile.Locale}/{resourceFile.FileName}]
+build_metadata.AdditionalFiles.SourceItemGroup = PRIResource
+");
+					TestState.AdditionalFiles.Add(($"C:/Project/0/Strings/{resourceFile.Locale}/{resourceFile.FileName}", resourceFile.Contents));
+				}
+
 				TestState.AnalyzerConfigFiles.Add(("/.globalconfig", globalConfigBuilder.ToString()));
-
-				ReferenceAssemblies = ReferenceAssemblies.Net.Net70;
-
-#if WRITE_EXPECTED
-				TestBehaviors |= TestBehaviors.SkipGeneratedSourcesCheck;
-#endif
+				await base.RunImplAsync(cancellationToken);
 			}
 
 			public IEnumerable<string> PreprocessorSymbols { get; set; } = ImmutableArray<string>.Empty;
@@ -229,12 +313,18 @@ build_metadata.AdditionalFiles.SourceItemGroup = Page
 #endif
 
 				var availableTargets = new[] {
-					Path.Combine("Uno.UI.Skia", configuration, "net7.0"),
-					Path.Combine("Uno.UI.Reference", configuration, "net7.0"),
+					// On CI the test assemblies set must be first, as it contains all
+					// dependent assemblies, which the other platforms don't (see DisablePrivateProjectReference).
+					Path.Combine("Uno.UI.Tests", configuration, "net8.0"),
+					Path.Combine("Uno.UI.Skia", configuration, "net8.0"),
+					Path.Combine("Uno.UI.Reference", configuration, "net8.0"),
+					Path.Combine("Uno.UI.Tests", configuration, "net9.0"),
+					Path.Combine("Uno.UI.Skia", configuration, "net9.0"),
+					Path.Combine("Uno.UI.Reference", configuration, "net9.0"),
 				};
 
 				var unoUIBase = Path.Combine(
-					Path.GetDirectoryName(typeof(HotReloadWorkspace).Assembly.Location)!,
+					Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
 					"..",
 					"..",
 					"..",

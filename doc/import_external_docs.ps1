@@ -7,15 +7,17 @@ Set-PSDebug -Trace 1
 
 $external_docs = @{
     # use either commit, or branch name to use its latest commit
-    "uno.wasm.bootstrap" = "a7a09c6e755d17331a3bba25df642f1ec42fb6a8"
-    "uno.themes"         = "530204ba38264e66478eebdd2abc9ce05df3b0b9"
-    "uno.toolkit.ui"     = "a0a15f56d1ba4f496a42a678ff981b41bde6396a"
-    "uno.check"          = "baf57490d5cdcb7fd209db0945615c75dcb8accb"
-    "uno.xamlmerge.task" = "7e8ffef206e87dfea90c53805c45e93a7d8c0b46"
-    "figma-docs"         = "9ee95d5b3627657d6e818d79e9d6e6019fc53f5b"
-    "uno.resizetizer"    = "3eec4aad0b7b3480ec6c2a121911ffde844fc4f8"
-    "uno.uitest"         = "555453c2985ef2745fe44503c5809a6168d063c2"
-    "uno.extensions"     = "fd39e2669674717e4f91746c5a4b8d09766e038c"      
+    "uno.wasm.bootstrap" = "6af3775bca9a732114df54e7e1253f0f813fd855" #latest release/stable/9.0 branch commit
+    "uno.themes"         = "be986dc71ace7e2f5075154321dbf0a68f5d00ce" #latest release/stable/5.3 branch commit
+    "uno.toolkit.ui"     = "490176858d99ca05a8615a11bb4da24a7c49a323" #latest release/stable/6.3 branch commit
+    "uno.check"          = "27e686d9205654375fd2c7861c3ebe5f2ad69e93" #latest main commit
+    "uno.xamlmerge.task" = "74c832124dad9a979f8d6318b6c18be1125467e5" #latest main commit
+    "figma-docs"         = "842a2792282b88586a337381b2b3786e779973b4" #latest main commit
+    "uno.resizetizer"    = "b17e1d54f4375f79da24ae5eaaf3f738851786eb" #latest main commit
+    "uno.uitest"         = "9669fd2783187d06c36dd6a717c1b9f08d1fa29c" #latest master commit
+    "uno.extensions"     = "f5bf97b18de7621de1a1bf4b0a30b465101fe8b7" #latest release/stable/5.1 branch commit
+    "workshops"          = "e3c2a11a588b184d8cd3a6f88813e5615cca891d" #latest master commit
+    "uno.samples"        = "46233a7f3efc750fd1bc87edb07ab269c7c5373c" #latest master commit
 }
 
 $uno_git_url = "https://github.com/unoplatform/"

@@ -1,15 +1,15 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Threading.Tasks;
 using Windows.Foundation;
-using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Controls.Primitives;
-using Windows.UI.Xaml.Markup;
-using Windows.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Media;
 using FluentAssertions;
 using MUXControlsTestApp.Utilities;
 using static Private.Infrastructure.TestServices;
-using Windows.UI.Xaml;
-using Windows.UI.Xaml.Data;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Data;
 using Uno.UI.RuntimeTests.Helpers;
 
 namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls;
@@ -1178,6 +1178,24 @@ public class Given_ItemsPresenter
 		await WindowHelper.WaitForIdle();
 
 		Assert.AreEqual(SUT.FindVisualChildByType<TextBlock>().Text, "updated footer value");
+	}
+
+	[TestMethod]
+	[RunsOnUIThread]
+	public async Task When_Inside_ScrollContentPresenter()
+	{
+		var lv = new ListView();
+		ScrollViewer.SetHorizontalScrollBarVisibility(lv, ScrollBarVisibility.Visible);
+		ScrollViewer.SetHorizontalScrollMode(lv, ScrollMode.Enabled);
+		lv.Items.Add("1");
+
+		await UITestHelper.Load(lv);
+
+		var sv = (ScrollViewer)((Border)VisualTreeHelper.GetChild(lv, 0)).Child;
+		var itemsPresenter = (ItemsPresenter)sv.Content;
+
+		var availableSize = LayoutInformation.GetAvailableSize(itemsPresenter);
+		Assert.AreNotEqual(double.PositiveInfinity, availableSize.Width);
 	}
 
 	public record MyTextModel(string MyText);

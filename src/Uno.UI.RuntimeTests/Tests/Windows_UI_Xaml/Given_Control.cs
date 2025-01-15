@@ -3,21 +3,72 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using Uno.UI.Extensions;
-using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Private.Infrastructure;
-using Windows.UI.Xaml.Media;
-using Windows.UI.Xaml;
-using Windows.UI.Xaml.Shapes;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 using Windows.Foundation;
+using Uno.UI.RuntimeTests.Helpers;
+using Uno.UI.Helpers;
+
+using Expander = Microsoft/* UWP don't rename */.UI.Xaml.Controls.Expander;
 
 namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml
 {
 	[TestClass]
 	public partial class Given_Control
 	{
+		private partial class CustomControl : Control
+		{
+			public Size AvailableSizePassedToMeasureOverride { get; private set; }
+			protected override Size MeasureOverride(Size availableSize)
+			{
+				AvailableSizePassedToMeasureOverride = availableSize;
+				return new(2000, 2000);
+			}
+		}
+
+#if HAS_UNO
+		private partial class OnApplyTemplateCounterControl : Control
+		{
+			public OnApplyTemplateCounterControl() : base()
+			{
+				Loading += (_, _) => OnControlLoading();
+			}
+
+			private ControlTemplate _template;
+			public int OnApplyTemplateCalls { get; private set; }
+
+			protected override void OnApplyTemplate()
+			{
+				// OnApplyTemplate should be called when the Template changes, so we only care
+				// about (unnecessary) calls that happen when the Template doesn't change
+				if (_template != Template)
+				{
+					_template = Template;
+					OnApplyTemplateCalls = 0;
+				}
+
+				OnApplyTemplateCalls++;
+			}
+
+			private void OnControlLoading() => Style = new Style
+			{
+				Setters =
+				{
+					new Setter(TemplateProperty, new ControlTemplate(() => new Grid())
+					{
+						TargetType = typeof(OnApplyTemplateCounterControl),
+					})
+				}
+			};
+		}
+#endif
+
 		[TestMethod]
 		[RunsOnUIThread]
 		public async Task When_Limited_By_Available_Size_Before_Margin_Application()
@@ -170,6 +221,78 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml
 		}
 #endif
 
+#if WINAPPSDK || UNO_HAS_ENHANCED_LIFECYCLE
+		[TestMethod]
+		[RunsOnUIThread]
+		public void When_Template_Changes_Should_Not_Be_Materialized_Immediately()
+		{
+			ConstructorCounterControl.Reset();
+
+			Assert.AreEqual(0, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+
+			var controlTemplate = (ControlTemplate)XamlReader.Load("""
+				<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+								 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+								 xmlns:local="using:Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml">
+					<local:ConstructorCounterControl />
+				</ControlTemplate>
+				""");
+
+			var control = new OnApplyTemplateCounterContentControl();
+
+			Assert.AreEqual(0, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(0, control.ApplyTemplateCount);
+			Assert.AreEqual(false, control.ApplyTemplate());
+			Assert.AreEqual(0, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(0, control.ApplyTemplateCount);
+
+			control.Template = controlTemplate;
+
+			Assert.AreEqual(0, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(0, control.ApplyTemplateCount);
+			Assert.AreEqual(true, control.ApplyTemplate());
+			Assert.AreEqual(1, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(1, control.ApplyTemplateCount);
+		}
+
+		[TestMethod]
+		[RunsOnUIThread]
+		public void When_Measure_Should_Materialize_Template()
+		{
+			ConstructorCounterControl.Reset();
+
+			Assert.AreEqual(0, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+
+			var controlTemplate = (ControlTemplate)XamlReader.Load("""
+				<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+								 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+								 xmlns:local="using:Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml">
+					<local:ConstructorCounterControl />
+				</ControlTemplate>
+				""");
+
+			var control = new OnApplyTemplateCounterContentControl();
+
+			control.Template = controlTemplate;
+
+			control.Measure(new Size(100, 100));
+
+			Assert.AreEqual(1, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(1, control.ApplyTemplateCount);
+			Assert.AreEqual(false, control.ApplyTemplate());
+			Assert.AreEqual(1, ConstructorCounterControl.ConstructorCount);
+			Assert.AreEqual(0, ConstructorCounterControl.ApplyTemplateCount);
+			Assert.AreEqual(1, control.ApplyTemplateCount);
+		}
+#endif
+
 		[TestMethod]
 		[RunsOnUIThread]
 		public async Task When_Refresh_Setter_BindingOnInvocation_ElementName()
@@ -237,52 +360,92 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml
 			// Padding shouldn't affect measure
 			Assert.AreEqual(0, ((UIElement)VisualTreeHelper.GetChild(SUT, 0)).ActualOffset.Y);
 		}
-	}
 
-#if HAS_UNO
-	public partial class OnApplyTemplateCounterControl : Control
-	{
-		public OnApplyTemplateCounterControl() : base()
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_CCButton_ApplyTemplate_WithChild()
 		{
-			Loading += (_, _) => OnControlLoading();
+			// When_CC(Button|Expander)_ApplyTemplate_With(No)?Child tests are designed to verify that
+			// when content is added as direct child (as a result of IsContentPresenterBypassEnabled),
+			// the template would still be applied.
+			// These tests can be removed once IsContentPresenterBypassEnabled is removed.
+
+			var SUT = XamlHelper.LoadXaml<Button>("""
+				<Button>
+					<TextBlock Text="Asd" />
+
+					<Button.Template>
+						<ControlTemplate TargetType="Button">
+							<Border x:Name="ControlTemplateRoot">
+								<ContentPresenter x:Name="ContentPresenter" Content="{TemplateBinding Content}" />
+							</Border>
+						</ControlTemplate>
+					</Button.Template>
+				</Button>
+			""");
+			await UITestHelper.Load(SUT);
+
+			Assert.IsNotNull(SUT.FindFirstDescendant<Border>("ControlTemplateRoot"), "Failed to find the expected template root (Border#ControlTemplateRoot)");
+		}
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_CCButton_ApplyTemplate_WithNoChild()
+		{
+			var SUT = XamlHelper.LoadXaml<Button>("""
+				<Button Content="Asd">
+					<Button.Template>
+						<ControlTemplate TargetType="Button">
+							<Border x:Name="ControlTemplateRoot">
+								<ContentPresenter x:Name="ContentPresenter" Content="{TemplateBinding Content}" />
+							</Border>
+						</ControlTemplate>
+					</Button.Template>
+				</Button>
+			""");
+			await UITestHelper.Load(SUT);
+
+			Assert.IsNotNull(SUT.FindFirstDescendant<Border>("ControlTemplateRoot"), "Failed to find the expected template root (Border#ControlTemplateRoot)");
 		}
 
-		private ControlTemplate _template;
-		public int OnApplyTemplateCalls { get; private set; }
-
-		protected override void OnApplyTemplate()
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_CCExpander_ApplyTemplate_WithChild()
 		{
-			// OnApplyTemplate should be called when the Template changes, so we only care
-			// about (unnecessary) calls that happen when the Template doesn't change
-			if (_template != Template)
-			{
-				_template = Template;
-				OnApplyTemplateCalls = 0;
-			}
+			var SUT = XamlHelper.LoadXaml<Expander>("""
+				<muxc:Expander>
+					<TextBlock Text="Asd" />
 
-			OnApplyTemplateCalls++;
+					<muxc:Expander.Template>
+						<ControlTemplate TargetType="muxc:Expander">
+							<Border x:Name="ControlTemplateRoot">
+								<ContentPresenter x:Name="ContentPresenter" Content="{TemplateBinding Content}" />
+							</Border>
+						</ControlTemplate>
+					</muxc:Expander.Template>
+				</muxc:Expander>
+			""");
+			await UITestHelper.Load(SUT);
+
+			Assert.IsNotNull(SUT.FindFirstDescendant<Border>("ControlTemplateRoot"), "Failed to find the expected template root (Border#ControlTemplateRoot)");
 		}
-
-		private void OnControlLoading() => Style = new Style
+		[TestMethod]
+		[RunsOnUIThread]
+		public async Task When_CCExpander_ApplyTemplate_WithNoChild()
 		{
-			Setters =
-			{
-				new Setter(TemplateProperty, new ControlTemplate(() => new Grid())
-				{
-					TargetType = typeof(OnApplyTemplateCounterControl),
-				})
-			}
-		};
-	}
-#endif
+			var SUT = XamlHelper.LoadXaml<Expander>("""
+				<muxc:Expander Content="Asd">
+					<muxc:Expander.Template>
+						<ControlTemplate TargetType="muxc:Expander">
+							<Border x:Name="ControlTemplateRoot">
+								<ContentPresenter x:Name="ContentPresenter" Content="{TemplateBinding Content}" />
+							</Border>
+						</ControlTemplate>
+					</muxc:Expander.Template>
+				</muxc:Expander>
+			""");
+			await UITestHelper.Load(SUT);
 
-	public partial class CustomControl : Control
-	{
-		public Size AvailableSizePassedToMeasureOverride { get; private set; }
-		protected override Size MeasureOverride(Size availableSize)
-		{
-			AvailableSizePassedToMeasureOverride = availableSize;
-			return new(2000, 2000);
+			Assert.IsNotNull(SUT.FindFirstDescendant<Border>("ControlTemplateRoot"), "Failed to find the expected template root (Border#ControlTemplateRoot)");
 		}
 	}
 }

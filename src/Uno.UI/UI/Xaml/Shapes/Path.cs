@@ -1,11 +1,9 @@
 ﻿#nullable enable
-using Windows.UI.Xaml.Media;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
-namespace Windows.UI.Xaml.Shapes
+using Windows.Foundation;
+using Microsoft.UI.Xaml.Media;
+
+namespace Microsoft.UI.Xaml.Shapes
 {
 	public partial class Path
 	{
@@ -24,11 +22,15 @@ namespace Windows.UI.Xaml.Shapes
 				typeof(Path),
 				new FrameworkPropertyMetadata(
 					defaultValue: null,
-					options: FrameworkPropertyMetadataOptions.ValueInheritsDataContext | FrameworkPropertyMetadataOptions.LogicalChild | FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange
+					options: FrameworkPropertyMetadataOptions.ValueInheritsDataContext | FrameworkPropertyMetadataOptions.LogicalChild | FrameworkPropertyMetadataOptions.AffectsMeasure
 				)
 			);
 
 		#endregion
 
+#if __NETSTD_REFERENCE__
+		protected override Size MeasureOverride(Size availableSize) => base.MeasureOverride(availableSize);
+		protected override Size ArrangeOverride(Size finalSize) => base.ArrangeOverride(finalSize);
+#endif
 	}
 }
