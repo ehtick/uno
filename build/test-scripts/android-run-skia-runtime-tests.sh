@@ -9,7 +9,11 @@ export UNO_UITEST_APP_ID="${UNO_UITEST_APP_ID=uno.platform.samplesapp.skia}"
 export UNO_UITEST_ANDROIDAPK_PATH=$BUILD_SOURCESDIRECTORY/build/$SAMPLEAPP_ARTIFACT_NAME/android/$UNO_UITEST_APP_ID-Signed.apk
 export UITEST_RUNTIME_TEST_GROUP=${UITEST_RUNTIME_TEST_GROUP=automated}
 export UNO_ORIGINAL_TEST_RESULTS=$BUILD_SOURCESDIRECTORY/build/TestResult-original.xml
-export UNO_TESTS_FAILED_LIST=$BUILD_SOURCESDIRECTORY/build/uitests-failure-results/failed-tests-skia-android-runtimetests-$UITEST_RUNTIME_TEST_GROUP.txt
+# A label (e.g. -webgpu) keeps a variant lane's retry list apart from the default lane's.
+export UNO_TEST_RESULT_LABEL=${UNO_TEST_RESULT_LABEL:-}
+# Extra intent extras for the app, e.g. "-e UNO_WEBGPU 1" to select the WebGPU backend.
+export UNO_TEST_APP_EXTRAS=${UNO_TEST_APP_EXTRAS:-}
+export UNO_TESTS_FAILED_LIST=$BUILD_SOURCESDIRECTORY/build/uitests-failure-results/failed-tests-skia-android${UNO_TEST_RESULT_LABEL}-runtimetests-$UITEST_RUNTIME_TEST_GROUP.txt
 
 ## Create the failed-tests directory up front: every abort path below (a crashed harness,
 ## a killed app, a non-zero transform tool) otherwise skips the mkdir and leaves
@@ -77,6 +81,13 @@ then
 	sdk_install 'extras;android;m2repository'
 	sdk_install "system-images;android-28;google_apis_playstore;$EMU_ARCH"
 	sdk_install "system-images;android-$ANDROID_SIMULATOR_APILEVEL;google_apis_playstore;$EMU_ARCH"
+	IMAGE_REVISION=$(grep -h "Pkg.Revision" "$ANDROID_HOME/system-images/android-$ANDROID_SIMULATOR_APILEVEL/google_apis_playstore/$EMU_ARCH/source.properties" | cut -d= -f2 | cut -d. -f1 || true)
+	echo "System image android-$ANDROID_SIMULATOR_APILEVEL revision: $IMAGE_REVISION"
+	# Before revision 7, the API 36 image's Vulkan driver crashes the app partway through the run (#25655).
+	if [[ "$ANDROID_SIMULATOR_APILEVEL" == "36" && "${IMAGE_REVISION:-0}" -lt 7 ]]; then
+		echo "##vso[task.logissue type=error]The android-36 system image is revision ${IMAGE_REVISION:-unknown}; revision 7 or later is required (#25655)."
+		exit 1
+	fi
 
 	# Create emulator
 	echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n "$AVD_NAME" --abi $EMU_ARCH -k "system-images;android-$ANDROID_SIMULATOR_APILEVEL;google_apis_playstore;$EMU_ARCH" --sdcard 128M --force
@@ -176,6 +187,7 @@ $ANDROID_HOME/platform-tools/adb shell am start \
   -e UITEST_RUNTIME_TEST_GROUP_COUNT "$UITEST_RUNTIME_TEST_GROUP_COUNT" \
   -e UITEST_RUNTIME_AUTOSTART_RESULT_FILE "$UITEST_RUNTIME_AUTOSTART_RESULT_DEVICE_PATH" \
   -e UITEST_RUNTIME_TESTS_FILTER "$UITEST_RUNTIME_TESTS_FILTER" \
+  $UNO_TEST_APP_EXTRAS
 
 TIMEOUT=0
 if [ "${UITEST_TEST_TIMEOUT:${#UITEST_TEST_TIMEOUT}-1:1}" = "s" ]; then
@@ -215,6 +227,12 @@ while [[ $SECONDS -lt $END_TIME ]]; do
     # exit loop if the APP_PID is not running anymore
     if ! $ANDROID_HOME/platform-tools/adb shell ps | grep "$UNO_UITEST_APP_ID" > /dev/null; then
         echo "The app is not running anymore"
+        break
+    fi
+
+    # A NativeAOT app can outlive its own fatal exception, so the process check above never fires
+    if $ANDROID_HOME/platform-tools/adb logcat -d -b crash | grep "Process: $UNO_UITEST_APP_ID," > /dev/null; then
+        echo "##vso[task.logissue type=error]The app crashed, see the FATAL EXCEPTION in the device log."
         break
     fi
 done

@@ -126,6 +126,7 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 		internal Lazy<INamedTypeSymbol> FrameworkElementSymbol { get; }
 		internal Lazy<INamedTypeSymbol> UIElementSymbol { get; }
 		internal Lazy<INamedTypeSymbol> DependencyObjectSymbol { get; }
+		internal Lazy<INamedTypeSymbol?> XNameProviderSymbol { get; }
 		internal Lazy<INamedTypeSymbol> MarkupExtensionSymbol { get; }
 		internal Lazy<INamedTypeSymbol> BrushSymbol { get; }
 		internal Lazy<INamedTypeSymbol> ImageSourceSymbol { get; }
@@ -176,6 +177,7 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 			}
 
 			_generatorContext = context;
+			_isDesignTimeBuild = Helpers.DesignTimeHelper.IsDesignTime(context);
 			InitTelemetry(context);
 
 			_metadataHelper = new RoslynMetadataHelper(context);
@@ -307,7 +309,6 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 			}
 
 			_isWasm = context.GetMSBuildPropertyValue("DefineConstantsProperty")?.Contains("__WASM__") ?? false;
-			_isDesignTimeBuild = Helpers.DesignTimeHelper.IsDesignTime(context);
 
 			StringSymbol = GetSpecialTypeSymbolAsLazy(SpecialType.System_String);
 			ObjectSymbol = GetSpecialTypeSymbolAsLazy(SpecialType.System_Object);
@@ -321,6 +322,7 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 			ImageSourceSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.ImageSource);
 			ImageSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.Image);
 			DependencyObjectSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.DependencyObject);
+			XNameProviderSymbol = GetOptionalSymbolAsLazy(XamlConstants.Types.IXNameProvider);
 			MarkupExtensionSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.MarkupExtension);
 			BrushSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.Brush);
 			DependencyObjectParseSymbol = GetMandatorySymbolAsLazy(XamlConstants.Types.IDependencyObjectParse);

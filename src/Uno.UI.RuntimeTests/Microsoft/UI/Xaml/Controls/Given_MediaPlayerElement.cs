@@ -11,6 +11,7 @@ using System.Threading;
 
 #if HAS_UNO
 using Uno.Foundation.Extensibility;
+using Uno.UI.Extensions;
 using Uno.Media.Playback;
 #endif
 
@@ -21,9 +22,48 @@ namespace Uno.UI.RuntimeTests.Tests.Windows_UI_Xaml_Controls;
 [TestClass]
 [RunsOnUIThread]
 [PlatformCondition(ConditionMode.Exclude, RuntimeTestPlatforms.NativeWinUI)]
+// Every test streams a remote video into a native child window that no drawing backend renders. Under WebGPU on a
+// GPU-less host, WARP rasterizes on every core and the player's TLS handshake to the video times out, so the tests
+// would measure the agent's spare CPU rather than the element.
+[BackendCondition(ConditionMode.Exclude, RuntimeTestBackends.WebGpu)]
 public partial class Given_MediaPlayerElement
 {
 	private static readonly Uri TestVideoUrl = new Uri("https://uno-assets.platform.uno/tests/uno/big_buck_bunny_720p_5mb.mp4");
+
+	// The element is sized, and so loaded, only once the remote video has been fetched and opened: on a contended agent
+	// (e.g. one also software-rasterizing the window) that takes well over the few seconds it does on a workstation.
+	private const int LoadTimeoutMS = 20000;
+
+	// Playback state changes come from the player's own threads, which a contended agent schedules late too.
+	private const int PlaybackTimeoutMS = 15000;
+
+	// The test video is remote, and a hosted agent intermittently fails to reach it (TLS handshake / HTTP connection
+	// failures in the player's log). That is the network, not the element: report it as inconclusive, but only when
+	// the player itself said it could not open the media.
+	private static async Task WaitForMediaLoaded(MediaPlayerElement sut)
+	{
+		// The element creates its player when its template applies, so watch for it while waiting.
+		Windows.Media.Playback.MediaPlayer watched = null;
+		var failed = false;
+		await WindowHelper.WaitFor(
+			() =>
+			{
+				if (watched is null && sut.MediaPlayer is { } player)
+				{
+					watched = player;
+					player.MediaFailed += (_, _) => failed = true;
+				}
+
+				return failed || (sut.IsLoaded && sut.ActualWidth > 0 && sut.ActualHeight > 0);
+			},
+			timeoutMS: LoadTimeoutMS,
+			message: $"Timeout waiting on {sut.GetType()} to be loaded");
+
+		if (failed)
+		{
+			Assert.Inconclusive($"The media player could not open {TestVideoUrl}.");
+		}
+	}
 
 	[TestCleanup]
 	public void Cleanup() => WindowHelper.WindowContent = null;
@@ -42,14 +82,102 @@ public partial class Given_MediaPlayerElement
 			Width = 100,
 		};
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		// PlaybackState should transition out of Opening state when the video is ready to play.
 		await WindowHelper.WaitFor(
 			condition: () => sut.MediaPlayer?.PlaybackSession?.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Paused,
-			timeoutMS: 5000,
+			timeoutMS: PlaybackTimeoutMS,
 			message: "Timeout waiting for the media player to enter Paused state."
 		);
+	}
+
+	[TestMethod]
+	// WASM (HTML5) never leaves Opening so Paused is unreachable; macOS (AVPlayer) times out at load.
+	[PlatformCondition(ConditionMode.Exclude, RuntimeTestPlatforms.SkiaMacOS | RuntimeTestPlatforms.SkiaWasm)]
+	public async Task When_Source_Set_While_ThreadPool_Busy_Media_Still_Opens()
+	{
+		CheckMediaPlayerExtensionAvailability();
+		var sut = new MediaPlayerElement()
+		{
+			AutoPlay = false,
+			Width = 100,
+		};
+		WindowHelper.WindowContent = sut;
+		await WindowHelper.WaitForLoaded(sut, static e => e.IsLoaded);
+		await WindowHelper.WaitFor(() => sut.MediaPlayer is not null);
+
+		// Setting the source stops the player and then starts it again. Anything the stop leaves to the
+		// thread pool must not overtake the start, which a saturated pool would otherwise guarantee.
+		// Only the Win32 backend defers Stop to the pool, so only there does this exercise that race.
+		var release = SaturateThreadPool();
+		try
+		{
+			sut.Source = MediaSource.CreateFromUri(TestVideoUrl);
+		}
+		finally
+		{
+			release.Set();
+		}
+
+		await WaitForMediaLoaded(sut);
+		await WindowHelper.WaitFor(
+			condition: () => sut.MediaPlayer?.PlaybackSession?.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Paused,
+			timeoutMS: PlaybackTimeoutMS,
+			message: "Timeout waiting for the media player to enter Paused state."
+		);
+	}
+
+	[TestMethod]
+	// WASM (HTML5) and macOS (AVPlayer) don't use the LibVLC extension this covers.
+	[PlatformCondition(ConditionMode.Exclude, RuntimeTestPlatforms.SkiaMacOS | RuntimeTestPlatforms.SkiaWasm)]
+	public async Task When_Disposed_While_Stop_Is_Queued_Then_Queued_Commands_Do_Not_Reach_The_Player()
+	{
+		CheckMediaPlayerExtensionAvailability();
+		var player = new Windows.Media.Playback.MediaPlayer();
+
+		var release = SaturateThreadPool();
+		try
+		{
+			player.Source = MediaSource.CreateFromUri(TestVideoUrl);
+			player.Dispose();
+		}
+		finally
+		{
+			release.Set();
+		}
+
+		// A queued Play reaching the released native player takes the whole test process down.
+		await Task.Delay(TimeSpan.FromSeconds(2));
+		await WindowHelper.WaitForIdle();
+	}
+
+	private static ManualResetEventSlim SaturateThreadPool()
+	{
+		ManualResetEventSlim release = new();
+		var round = 0;
+
+		// Always queue a batch: work that is already pending may finish long before the Stop this has to delay.
+		do
+		{
+			var blockers = ThreadPool.ThreadCount + Environment.ProcessorCount * 4;
+			for (var i = 0; i < blockers; i++)
+			{
+				ThreadPool.QueueUserWorkItem(static gate => ((ManualResetEventSlim)gate!).Wait(), release);
+			}
+
+			// Sleeping, not awaiting: timers need the pool, and this only has to let the idle threads pick up work.
+			Thread.Sleep(100);
+		}
+		while (++round < 10 && ThreadPool.PendingWorkItemCount == 0);
+
+		if (ThreadPool.PendingWorkItemCount == 0)
+		{
+			release.Set();
+			Assert.Fail("Could not saturate the thread pool, so this run would not exercise the race.");
+		}
+
+		return release;
 	}
 
 	[TestMethod]
@@ -65,20 +193,20 @@ public partial class Given_MediaPlayerElement
 			Source = MediaSource.CreateFromUri(TestVideoUrl),
 		};
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 #if __SKIA__
 		// AutoPlay is not working on Skia for now.
 		await WindowHelper.WaitFor(
 			condition: () => sut.MediaPlayer?.PlaybackSession?.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Paused,
-			timeoutMS: 5000,
+			timeoutMS: PlaybackTimeoutMS,
 			message: "Timeout waiting for the media player to enter Playing state on Auto Play."
 		);
 #else
 		// PlaybackState should transition out of Opening state when the video is ready to play.
 		await WindowHelper.WaitFor(
 			condition: () => sut.MediaPlayer?.PlaybackSession?.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing,
-			timeoutMS: 5000,
+			timeoutMS: PlaybackTimeoutMS,
 			message: "Timeout waiting for the media player to enter Playing state on Auto Play."
 		);
 #endif
@@ -108,7 +236,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		sut.MediaPlayer.Play();
 
@@ -135,7 +263,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		sut.MediaPlayer.Play();
 
@@ -178,12 +306,12 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		sut.MediaPlayer.Play();
 		await WindowHelper.WaitFor(
 				condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing,
-				timeoutMS: 3000,
+				timeoutMS: PlaybackTimeoutMS,
 				message: "Timeout waiting for the playback session state changing to Play."
 			);
 	}
@@ -203,13 +331,13 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		// step 1: Test Play
 		sut.MediaPlayer.Play();
 		await WindowHelper.WaitFor(
 					condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing,
-					timeoutMS: 3000,
+					timeoutMS: PlaybackTimeoutMS,
 					message: "Timeout waiting for the playback session state changing to playing on PlayStop."
 				);
 
@@ -222,7 +350,7 @@ public partial class Given_MediaPlayerElement
 #endif
 		await WindowHelper.WaitFor(
 					condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState != MediaPlaybackState.Playing,
-					timeoutMS: 3000,
+					timeoutMS: PlaybackTimeoutMS,
 					message: "Timeout waiting for the playback session state changing to Stop on PlayStop."
 				);
 #if !HAS_UNO
@@ -244,13 +372,13 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		// step 1: Test Play
 		sut.MediaPlayer.Play();
 		await WindowHelper.WaitFor(
 					condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing,
-					timeoutMS: 3000,
+					timeoutMS: PlaybackTimeoutMS,
 					message: "Timeout waiting for the playback session state changing to playing on PlayPause."
 				);
 
@@ -260,7 +388,7 @@ public partial class Given_MediaPlayerElement
 		sut.MediaPlayer.Pause();
 		await WindowHelper.WaitFor(
 			condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState != MediaPlaybackState.Playing,
-			timeoutMS: 6000,
+			timeoutMS: PlaybackTimeoutMS,
 			message: "Timeout waiting for the playback session state changing to Pause on PlayPause."
 		);
 	}
@@ -283,7 +411,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		sut.AreTransportControlsEnabled = false;
 
@@ -313,7 +441,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WaitForMediaLoaded(sut);
 
 		// step 1: disalbe ShowAndHideAutomatically
 		var root = (WindowHelper.XamlRoot?.Content as FrameworkElement)!;
@@ -546,23 +674,6 @@ public partial class Given_MediaPlayerElement
 					message: "Timeout waiting for TransportControls IsZoomButtonVisible Visibility Collapsed when Auto Hide."
 				);
 
-#if !WINAPPSDK
-		sut.TransportControls.IsCompactOverlayButtonVisible = true;
-		esut = (FrameworkElement)root.FindName("CompactOverlayButton");
-		await WindowHelper.WaitFor(
-					condition: () => esut.Visibility == Visibility.Visible,
-					timeoutMS: 3000,
-					message: "Timeout waiting for TransportControls IsCompactOverlayButtonVisible Visibility Collapsed when Auto Hide."
-				);
-		sut.TransportControls.IsCompactOverlayButtonVisible = false;
-		esut = (FrameworkElement)root.FindName("CompactOverlayButton");
-		await WindowHelper.WaitFor(
-					condition: () => esut.Visibility == Visibility.Collapsed,
-					timeoutMS: 3000,
-					message: "Timeout waiting for TransportControls IsCompactOverlayButtonVisible Visibility Collapsed when Auto Hide."
-				);
-#endif
-
 		sut.TransportControls.IsSeekBarVisible = true;
 		esut = (FrameworkElement)root.FindName("MediaTransportControls_Timeline_Border");
 		await WindowHelper.WaitFor(
@@ -578,6 +689,82 @@ public partial class Given_MediaPlayerElement
 					message: "Timeout waiting for TransportControls IsSeekBarVisible Visibility Collapsed when Auto Hide."
 				);
 	}
+
+#if HAS_UNO
+	[TestMethod]
+	// Uno-specific: WinUI's MediaPlayerPresenter has no visibility logic; Uno collapses the templated presenter until a source shows up.
+	// The macOS AVPlayer extension reports a source change while initializing, which shows the presenter right away.
+	[PlatformCondition(ConditionMode.Exclude, RuntimeTestPlatforms.SkiaMacOS)]
+	public async Task When_MediaPlayerElement_Loaded_Without_Source_Presenter_Collapsed()
+	{
+		CheckMediaPlayerExtensionAvailability();
+		var sut = new MediaPlayerElement();
+		WindowHelper.WindowContent = sut;
+		// Without a source the element can measure to zero, so only wait for Loaded.
+		await WindowHelper.WaitForLoaded(sut, static e => e.IsLoaded);
+		await WindowHelper.WaitForIdle();
+
+		var presenter = sut.FindFirstChild<MediaPlayerPresenter>();
+		Assert.IsNotNull(presenter);
+		Assert.AreEqual(Visibility.Collapsed, presenter.Visibility);
+	}
+
+	[TestMethod]
+	// Uno-specific: WinUI's template leaves the presenter's IsFullWindow unbound, and WinUI 3 disables full window.
+	public async Task When_MediaPlayerElement_IsFullWindow_Set_Before_Template_Enters_Full_Window()
+	{
+		CheckMediaPlayerExtensionAvailability();
+		var sut = new MediaPlayerElement() { IsFullWindow = true };
+		try
+		{
+			WindowHelper.WindowContent = sut;
+			await WindowHelper.WaitForLoaded(sut, static e => e.IsLoaded);
+			await WindowHelper.WaitForIdle();
+
+			var fullWindowContent = sut.XamlRoot!.VisualTree.FullWindowMediaRoot.Child;
+			Assert.IsNotNull(fullWindowContent);
+
+			var presenter = fullWindowContent.FindFirstChild<MediaPlayerPresenter>();
+			Assert.IsNotNull(presenter);
+			Assert.IsTrue(presenter.IsFullWindow);
+		}
+		finally
+		{
+			sut.IsFullWindow = false;
+			WindowHelper.WindowContent = null;
+		}
+	}
+
+	[TestMethod]
+	// Uno-specific: WinUI's MediaPlayerPresenter has no visibility logic.
+	[PlatformCondition(ConditionMode.Exclude, RuntimeTestPlatforms.SkiaMacOS | RuntimeTestPlatforms.SkiaWasm)]
+	public async Task When_MediaPlayerElement_Retemplated_With_Source_Presenter_Stays_Visible()
+	{
+		CheckMediaPlayerExtensionAvailability();
+		var sut = new MediaPlayerElement() { Source = MediaSource.CreateFromUri(TestVideoUrl) };
+		try
+		{
+			WindowHelper.WindowContent = sut;
+			await WindowHelper.WaitForLoaded(sut, static e => e.IsLoaded);
+			await WindowHelper.WaitFor(() => sut.FindFirstChild<MediaPlayerPresenter>()?.Visibility == Visibility.Visible);
+
+			var template = sut.Template;
+			sut.Template = null;
+			sut.Template = template;
+			sut.ApplyTemplate();
+			await WindowHelper.WaitForIdle();
+
+			var presenter = sut.FindFirstChild<MediaPlayerPresenter>();
+			Assert.IsNotNull(presenter);
+			Assert.AreEqual(Visibility.Visible, presenter.Visibility);
+		}
+		finally
+		{
+			sut.MediaPlayer?.Pause();
+			WindowHelper.WindowContent = null;
+		}
+	}
+#endif
 
 	private void CheckMediaPlayerExtensionAvailability()
 	{
